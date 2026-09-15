@@ -26,3 +26,13 @@ V7 dual-lane blending      mid/end evaluator mixture weights
   (gate 0.99). Loss plateaued at ~0.038. Mapped limiter candidate: random
   readout under-receives legality structure (same failure class as the CX
   dilution bug) -> V1 is the first test.
+
+## Wiring measurements (wiring_engineer.py, wiring_report.json)
+- Capacity = 1.0 at ALL sites (16 channels multiplexed perfectly through 2
+  linear steps) — channel count is NOT the limiter.
+- Routing: sensory_periph is the WORST hub (gain 105K, 50% self-locked).
+  medulla_Tm/lobula/lobula_plate = high-gain visual path; LH routes INTO KC.
+- 21 dead features (king-count constants, empty-slot pins) — flagged pre-train.
+- V2 = structured wiring: 9 families -> measured sites, direct site injection
+  (bypasses periphery), block-masked weights, variance readout.
+  arms: fly_cb_v2wire.pt (fresh) vs fly_cb_v1var.pt vs baseline plateau.

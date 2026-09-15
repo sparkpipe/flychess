@@ -27,7 +27,7 @@ import scipy.sparse as sp
 import flyfeat_cb
 
 DEV = "cuda"
-STATE = "/home/spec/chess-lab/fly_cb.pt"
+STATE = os.environ.get("STATE", "/home/spec/chess-lab/fly_cb.pt")
 LOGF = "/home/spec/chess-lab/fly_cb_log.jsonl"
 BRAIN = "/home/spec/chess-lab/brain_graph.npz"
 SENS = "/home/spec/chess-lab/sensory_idx.npy"
@@ -36,8 +36,26 @@ B = int(os.environ.get("B", "256"))
 MAXL = 256
 
 
+# measured family -> site assignment (wiring_report.json 2026-09-15):
+# capacity 1.0 everywhere; sensory_periph worst hub (gain 105K, 50%
+# self-locked); medulla_Tm/lobula/lobula_plate the high-gain visual path;
+# LH routes INTO KC (0.13) for associative convergence.
+WIRING_MAP = {
+    "attacks":     "medulla_Tm",
+    "occupancy":   "medulla_Tm",
+    "eyes_view":   "lobula_plate",
+    "king_rings":  "lobula",
+    "mobility":    "lobula",
+    "material":    "KC",
+    "castling":    "lateral_horn",
+    "en_passant":  "lateral_horn",
+    "check_state": "lateral_horn",
+}
+
+
 class FlyCB(torch.nn.Module):
-    def __init__(self, n_feats, sel_boards=None, readout="random"):
+    def __init__(self, n_feats, sel_boards=None, readout="random",
+                 wiring=None):
         super().__init__()
         z = np.load(BRAIN)
         m = sp.csr_matrix((z["data"], z["indices"], z["indptr"]),
@@ -55,11 +73,29 @@ class FlyCB(torch.nn.Module):
             torch.from_numpy(mt.indices.astype(np.int64)),
             torch.from_numpy(mt.data), size=mt.shape, device=DEV)
         self.W_sens = torch.nn.Linear(n_feats, len(sens))
+        self.inj_idx = self.sensory_idx          # default: periphery
         self.theta = torch.nn.Parameter(torch.zeros(4096))
         self.theta_mv = torch.nn.Parameter(torch.zeros(8))
         self.theta_cls = torch.nn.Parameter(torch.zeros(3))
         self.cls_idx = torch.from_numpy(free[p2[4096:4099]].astype(np.int64)).to(DEV)
         self.readout_mode = readout
+        if wiring:
+            # inject DIRECTLY at the assigned anatomical sites (bypasses the
+            # periphery entirely — measured to be the worst hub)
+            rows_all = np.concatenate(
+                [np.asarray(r, dtype=np.int64) for _, (c, r) in wiring.items()])
+            self.inj_idx = torch.from_numpy(rows_all).to(DEV)
+            M = np.zeros((len(rows_all), n_feats), dtype=np.float32)
+            off = 0
+            for fam, (cols, rws) in wiring.items():
+                M[off:off + len(rws), cols] = 1.0
+                off += len(rws)
+            self.W_sens = torch.nn.Linear(n_feats, len(rows_all))
+            self.register_buffer("wmask", torch.from_numpy(M))  # moves with .to()
+            with torch.no_grad():
+                self.W_sens.weight.mul_(torch.from_numpy(M))
+        else:
+            self.register_buffer("wmask", None)
         if sel_boards is not None:
             self._select_readouts(sel_boards)
 
@@ -67,10 +103,11 @@ class FlyCB(torch.nn.Module):
     def _select_readouts(self, boards, n_move=4096, n_cls=3):
         """Pathway experiment: readout neurons chosen by activation variance
         across diverse boards (random sampling under-receives signal)."""
+        self.to(DEV)
         a = self.propagate(np.stack([flyfeat_cb.feat_vec(b)[0]
                                      for b in boards]))
         var = a.var(dim=1).cpu().numpy()
-        var[self.sensory_idx.cpu().numpy()] = -1.0
+        var[self.inj_idx.cpu().numpy()] = -1.0
         order = np.argsort(var)[::-1]
         self.readout_idx = torch.from_numpy(
             order[:n_move].astype(np.int64)).to(DEV)
@@ -81,9 +118,12 @@ class FlyCB(torch.nn.Module):
 
     def propagate(self, fvb):
         x = torch.from_numpy(fvb).to(DEV)
-        s = torch.clamp(self.W_sens(x), -6, 6)
+        w = self.W_sens.weight * self.wmask if self.wmask is not None \
+            else self.W_sens.weight
+        s = torch.clamp(torch.nn.functional.linear(x, w, self.W_sens.bias),
+                        -6, 6)
         a = torch.zeros(self.N, x.shape[0], device=DEV)
-        a[self.sensory_idx] = s.T
+        a[self.inj_idx] = s.T
         for _ in range(PROP_STEPS):
             a = torch.clamp((1 - LEAK) * a + LEAK * (self.WT @ a), -CAP, CAP)
         return a
@@ -485,6 +525,31 @@ def main_tb(steps):
     v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
     readout = os.environ.get("READOUT", "random")
+    wiring = None
+    if os.environ.get("WIRING", "") == "structured":
+        from wiring_engineer import FAMILIES, site_masks
+        node_ids = np.load("/home/spec/chess-lab/node_ids.npy")
+        masks = site_masks(node_ids)
+        cols_all = flyfeat_cb.FEATURE_KEYS
+        rngw = random.Random(9001)
+        alloc = {}                             # site -> remaining neurons
+        wiring = {}
+        for fam, site in WIRING_MAP.items():
+            idx = masks.get(site)
+            if idx is None:
+                continue
+            cols = np.array([i for i, k in enumerate(cols_all)
+                             if FAMILIES[fam](k)], dtype=np.int64)
+            if len(cols) == 0:
+                continue
+            take = max(32, min(len(idx), 4 * len(cols)))
+            pool = alloc.setdefault(site, idx.copy())
+            rngw.shuffle(pool)
+            rows = np.sort(pool[:take])
+            alloc[site] = pool[take:]
+            wiring[fam] = (cols.tolist(), rows.tolist())
+        print(f"structured wiring: {sum(len(r) for _, r in wiring.values())} "
+              f"neurons across {len(wiring)} families", flush=True)
     sel = None
     if readout == "variance":
         rs = random.Random(4242)
@@ -499,7 +564,7 @@ def main_tb(steps):
             if not bb.is_game_over():
                 sel.append(bb)
     model = FlyCB(len(flyfeat_cb.FEATURE_KEYS),
-                  sel_boards=sel, readout=readout).to(DEV)
+                  sel_boards=sel, readout=readout, wiring=wiring).to(DEV)
     if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
         model.load_state_dict(torch.load(STATE, weights_only=True))
         print("resumed", flush=True)
@@ -712,6 +777,31 @@ def main():
     v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
     readout = os.environ.get("READOUT", "random")
+    wiring = None
+    if os.environ.get("WIRING", "") == "structured":
+        from wiring_engineer import FAMILIES, site_masks
+        node_ids = np.load("/home/spec/chess-lab/node_ids.npy")
+        masks = site_masks(node_ids)
+        cols_all = flyfeat_cb.FEATURE_KEYS
+        rngw = random.Random(9001)
+        alloc = {}                             # site -> remaining neurons
+        wiring = {}
+        for fam, site in WIRING_MAP.items():
+            idx = masks.get(site)
+            if idx is None:
+                continue
+            cols = np.array([i for i, k in enumerate(cols_all)
+                             if FAMILIES[fam](k)], dtype=np.int64)
+            if len(cols) == 0:
+                continue
+            take = max(32, min(len(idx), 4 * len(cols)))
+            pool = alloc.setdefault(site, idx.copy())
+            rngw.shuffle(pool)
+            rows = np.sort(pool[:take])
+            alloc[site] = pool[take:]
+            wiring[fam] = (cols.tolist(), rows.tolist())
+        print(f"structured wiring: {sum(len(r) for _, r in wiring.values())} "
+              f"neurons across {len(wiring)} families", flush=True)
     sel = None
     if readout == "variance":
         rs = random.Random(4242)
@@ -726,7 +816,7 @@ def main():
             if not bb.is_game_over():
                 sel.append(bb)
     model = FlyCB(len(flyfeat_cb.FEATURE_KEYS),
-                  sel_boards=sel, readout=readout).to(DEV)
+                  sel_boards=sel, readout=readout, wiring=wiring).to(DEV)
     if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
         model.load_state_dict(torch.load(STATE, weights_only=True))
         print("resumed", flush=True)

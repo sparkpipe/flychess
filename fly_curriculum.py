@@ -37,7 +37,7 @@ MAXL = 256
 
 
 class FlyCB(torch.nn.Module):
-    def __init__(self, n_feats):
+    def __init__(self, n_feats, sel_boards=None, readout="random"):
         super().__init__()
         z = np.load(BRAIN)
         m = sp.csr_matrix((z["data"], z["indices"], z["indptr"]),
@@ -59,6 +59,25 @@ class FlyCB(torch.nn.Module):
         self.theta_mv = torch.nn.Parameter(torch.zeros(8))
         self.theta_cls = torch.nn.Parameter(torch.zeros(3))
         self.cls_idx = torch.from_numpy(free[p2[4096:4099]].astype(np.int64)).to(DEV)
+        self.readout_mode = readout
+        if sel_boards is not None:
+            self._select_readouts(sel_boards)
+
+    @torch.no_grad()
+    def _select_readouts(self, boards, n_move=4096, n_cls=3):
+        """Pathway experiment: readout neurons chosen by activation variance
+        across diverse boards (random sampling under-receives signal)."""
+        a = self.propagate(np.stack([flyfeat_cb.feat_vec(b)[0]
+                                     for b in boards]))
+        var = a.var(dim=1).cpu().numpy()
+        var[self.sensory_idx.cpu().numpy()] = -1.0
+        order = np.argsort(var)[::-1]
+        self.readout_idx = torch.from_numpy(
+            order[:n_move].astype(np.int64)).to(DEV)
+        self.cls_idx = torch.from_numpy(
+            order[n_move:n_move + n_cls].astype(np.int64)).to(DEV)
+        print(f"readout=variance: top var {var[order[0]]:.3f}, "
+              f"4096th {var[order[n_move-1]]:.4f}", flush=True)
 
     def propagate(self, fvb):
         x = torch.from_numpy(fvb).to(DEV)
@@ -465,10 +484,27 @@ def main_tb(steps):
     rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP"])
     v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
-    model = FlyCB(len(flyfeat_cb.FEATURE_KEYS)).to(DEV)
-    if os.path.exists(STATE):
+    readout = os.environ.get("READOUT", "random")
+    sel = None
+    if readout == "variance":
+        rs = random.Random(4242)
+        sel = []
+        for _ in range(240):
+            bb = chess.Board()
+            for _ in range(rs.randrange(8, 70)):
+                mm = list(bb.legal_moves)
+                if not mm:
+                    break
+                bb.push(rs.choice(mm))
+            if not bb.is_game_over():
+                sel.append(bb)
+    model = FlyCB(len(flyfeat_cb.FEATURE_KEYS),
+                  sel_boards=sel, readout=readout).to(DEV)
+    if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
         model.load_state_dict(torch.load(STATE, weights_only=True))
         print("resumed", flush=True)
+    elif os.environ.get("FRESH", "0") == "1":
+        print("FRESH weights (from-scratch arm)", flush=True)
     opt = torch.optim.Adam(model.parameters(), lr=3e-4)
     rng = random.Random(6000)
     t0 = time.time()
@@ -675,10 +711,27 @@ def main():
         return
     v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
-    model = FlyCB(len(flyfeat_cb.FEATURE_KEYS)).to(DEV)
-    if os.path.exists(STATE):
+    readout = os.environ.get("READOUT", "random")
+    sel = None
+    if readout == "variance":
+        rs = random.Random(4242)
+        sel = []
+        for _ in range(240):
+            bb = chess.Board()
+            for _ in range(rs.randrange(8, 70)):
+                mm = list(bb.legal_moves)
+                if not mm:
+                    break
+                bb.push(rs.choice(mm))
+            if not bb.is_game_over():
+                sel.append(bb)
+    model = FlyCB(len(flyfeat_cb.FEATURE_KEYS),
+                  sel_boards=sel, readout=readout).to(DEV)
+    if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
         model.load_state_dict(torch.load(STATE, weights_only=True))
         print("resumed", flush=True)
+    elif os.environ.get("FRESH", "0") == "1":
+        print("FRESH weights (from-scratch arm)", flush=True)
     opt = torch.optim.Adam(model.parameters(), lr=3e-4)
     rng = random.Random(1000 + stage)
     train_stage(model, opt, stage, steps, rng)

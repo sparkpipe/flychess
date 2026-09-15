@@ -36,3 +36,12 @@ V7 dual-lane blending      mid/end evaluator mixture weights
 - V2 = structured wiring: 9 families -> measured sites, direct site injection
   (bypasses periphery), block-masked weights, variance readout.
   arms: fly_cb_v2wire.pt (fresh) vs fly_cb_v1var.pt vs baseline plateau.
+
+## New-signal principle (operator)
+Adding signal means NEW information, not repeating the same channel. The
+color-blind relative view collapses positions except at the boundary — so
+the EDGE OF BOARD is genuinely new signal. Added: per-piece distances to all
+4 edges (eye{i}_eu/ed/el/er, 128 dims) + attacked-square-on-edge conjunctions
+(atk_edge_my/their, 128 dims) → 2746 total. Mirror-invariance verified 0-diff.
+The from-scratch verification run trains with these; the rook rank-1
+failures were exactly this missing concept.

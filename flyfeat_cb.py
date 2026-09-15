@@ -44,10 +44,14 @@ def extract(board):
     o_my = np.zeros(64, dtype=np.float32)
     o_th = np.zeros(64, dtype=np.float32)
     eyes = []
+    eyes_geo = []                       # (dist up, down, left, right) to edges
     for sq in chess.SQUARES:
         pc = board.piece_at(sq)
         if pc is None:
             continue
+        sf, sr = chess.square_file(sq), chess.square_rank(sq)
+        eyes_geo.append((sr / 7.0, (7 - sr) / 7.0,
+                         sf / 7.0, (7 - sf) / 7.0))
         mine = pc.color == board.turn
         if mine:
             o_my[sq] = 1.0
@@ -88,11 +92,24 @@ def extract(board):
                 f[f"eye{i}_s{s2}"] = e[s2]
             f[f"eye{i}_pin"] = e[64]
             f[f"eye{i}_mob"] = e[65]
+            eu, ed, el, er = eyes_geo[i]
+            f[f"eye{i}_eu"] = eu                  # edge-of-board geometry:
+            f[f"eye{i}_ed"] = ed                  # NEW signal the relative
+            f[f"eye{i}_el"] = el                  # view collapses away
+            f[f"eye{i}_er"] = er
         else:
             for s2 in range(64):
                 f[f"eye{i}_s{s2}"] = 0.0
             f[f"eye{i}_pin"] = 0.0
             f[f"eye{i}_mob"] = 0.0
+            f[f"eye{i}_eu"] = f[f"eye{i}_ed"] = 0.0
+            f[f"eye{i}_el"] = f[f"eye{i}_er"] = 0.0
+    # attacked-square-on-edge conjunctions (the rook failure signature)
+    edge = np.array([1.0 if (s % 8 in (0, 7)) or (s // 8 in (0, 7)) else 0.0
+                     for s in range(64)], dtype=np.float32)
+    for sq in chess.SQUARES:
+        f[f"atk_edge_my_{sq}"] = min(a_my[sq], 1.0) * edge[sq]
+        f[f"atk_edge_their_{sq}"] = min(a_th[sq], 1.0) * edge[sq]
 
     # ---- material ----
     for t, pt in enumerate(pts):

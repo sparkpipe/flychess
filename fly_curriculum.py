@@ -31,7 +31,9 @@ STATE = os.environ.get("STATE", "/home/spec/chess-lab/fly_cb.pt")
 LOGF = "/home/spec/chess-lab/fly_cb_log.jsonl"
 BRAIN = "/home/spec/chess-lab/brain_graph.npz"
 SENS = "/home/spec/chess-lab/sensory_idx.npy"
-PROP_STEPS, LEAK, CAP = 2, 0.5, 20.0
+PROP_STEPS = int(os.environ.get("STEPS", "6"))   # real circuits are 4-7 synapses
+LEAK = float(os.environ.get("LEAK", "0.5"))
+CAP = 20.0
 B = int(os.environ.get("B", "256"))
 MAXL = 256
 
@@ -151,15 +153,15 @@ def make_board(rng, pieces):
     return b
 
 
-def gen_stage(rng, stage, batch):
+def gen_stage(rng, stage, batch, piece=None):
     """Yield list of (canonical_board, spec): leg_sq, target_mv, cls."""
     out = []
     while len(out) < batch:
         spec = {}
         if stage == 1:
             k1, k2 = fresh_kings(rng)
-            pt = rng.choice([chess.KNIGHT, chess.BISHOP, chess.ROOK,
-                             chess.QUEEN, chess.PAWN])
+            pt = piece or rng.choice([chess.KNIGHT, chess.BISHOP, chess.ROOK,
+                                      chess.QUEEN, chess.PAWN])
             cand = [s for s in range(64) if s not in (k1, k2)]
             if pt == chess.PAWN:
                 cand = [s for s in cand if 8 <= s < 48]
@@ -405,8 +407,8 @@ def gen_mate1(rng):
 
 
 # ---------------- batch building ----------------
-def build_batch(rng, stage, batch):
-    boards_specs = gen_stage(rng, stage, batch)
+def build_batch(rng, stage, batch, piece=None):
+    boards_specs = gen_stage(rng, stage, batch, piece=piece)
     fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
     slotb = np.zeros((len(boards_specs), MAXL), np.int64)
     mfb = np.zeros((len(boards_specs), MAXL, 8), np.float32)
@@ -448,22 +450,30 @@ def forward(model, fvb, slotb, mfb, maskb):
     return torch.log_softmax(T, dim=1), T_all, cls
 
 
-def train_stage(model, opt, stage, steps, rng):
+HARD_SLOT_W = {}                       # (from,to) -> weight boost
+
+
+def train_stage(model, opt, stage, steps, rng, piece=None):
     t0 = time.time()
     for step in range(1, steps + 1):
-        bb = build_batch(rng, stage, B)
+        bb = build_batch(rng, stage, B, piece=piece)
         fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots = bb
         logp, T_all, cls = forward(model, fvb, slotb, mfb, maskb)
         loss = 0.0
         if leg_idx:
             yy = torch.zeros(len(leg_idx), 4096, device=DEV)
+            ww = torch.ones(len(leg_idx), 4096, device=DEV)
             for r, (y, K) in enumerate(leg_slots):
                 idx = torch.tensor([int(s) for s in slotb[leg_idx[r], :K]],
                                    device=DEV)
                 yy[r, idx] = torch.from_numpy(y[:K]).to(DEV)
+                for j, s in enumerate(slotb[leg_idx[r], :K]):
+                    wboost = HARD_SLOT_W.get(int(s))
+                    if wboost:
+                        ww[r, int(s)] = wboost
             rows = T_all[leg_idx]
-            loss = loss + torch.nn.functional.binary_cross_entropy_with_logits(
-                rows, yy)
+            loss = loss + (torch.nn.functional.binary_cross_entropy_with_logits(
+                rows, yy, reduction="none") * ww).mean()
         mv = torch.from_numpy(tgtb).to(DEV)
         mvk = mv >= 0
         if int(mvk.sum()):
@@ -517,6 +527,114 @@ def gate_stage(model, stage, rng):
 
 STAGE_GATE = {1: (0.99, None), 2: (0.99, None), 3: (0.99, 1.00),
               4: (0.99, 1.00), 5: (None, 1.00), 6: (None, 0.98)}
+
+PIECE_ORDER = [chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.QUEEN,
+               chess.PAWN]
+
+
+def eval_piece(model, piece, n=64, seed=5000):
+    """Held-out battery for ONE piece type. Returns (pair, top1, failures):
+    failures = list of (fen, piece_sq, legal_to, illegal_to, gap) where the
+    illegal slot outscores the legal one."""
+    rng = random.Random(seed + piece)
+    boards_specs = gen_stage(rng, 1, n, piece=piece)
+    fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
+    with torch.no_grad():
+        a = model.propagate(fvb)
+        T_all = model.logits_all(a)                      # (n, 4096)
+    ok = tot = top_ok = 0
+    failures = []
+    for i, (b, spec) in enumerate(boards_specs):
+        sq = spec["leg_sq"]
+        legal = {m.to_square for m in b.legal_moves if m.from_square == sq}
+        if not legal:
+            continue
+        illegal = [t for t in range(64) if t != sq and t not in legal
+                   and t not in (b.king(chess.WHITE), b.king(chess.BLACK))]
+        if not illegal:
+            continue
+        row = T_all[i]
+        for lt in list(legal)[:4]:
+            for it in illegal[:4]:
+                gl = float(row[sq * 64 + lt])
+                gi = float(row[sq * 64 + it])
+                tot += 1
+                ok += int(gl > gi)
+                if gl <= gi:
+                    failures.append((b.fen(), sq, lt, it, round(gl - gi, 3)))
+        top_ok += int(all(max(row[sq * 64 + t] for t in range(64)
+                              if t != sq) < max(row[sq * 64 + lt]
+                                                for lt in legal) for lt in [max(legal, key=lambda t: row[sq * 64 + t])]))
+    return ok / max(tot, 1), failures
+
+
+def milestone_stage1(model, opt):
+    """Stage 1 as true per-item milestones: eval after EVERY training step
+    (one batch = one item), stop the moment the curve turns.
+    PASS -> next piece. Two consecutive non-improvements -> STOP + dump the
+    actual failing positions."""
+    logf = open(LOGF, "a")
+    for piece in PIECE_ORDER:
+        name = chess.piece_name(piece)
+        print(f"=== MILESTONE piece={name} ===", flush=True)
+        best = -1.0
+        stall = 0
+        rng = random.Random(1000 + piece)
+        for step in range(1, 6001):                 # hard cap per piece
+            train_stage(model, opt, 1, 1, rng, piece=piece)
+            pair, failures = eval_piece(model, piece, n=32)
+            if step % 20 == 0 or pair >= 0.99 or (stall >= 1):
+                rec = {"milestone": name, "step": step,
+                       "pair": round(pair, 4)}
+                print(json.dumps(rec), flush=True)
+                logf.write(json.dumps(rec) + "\n"); logf.flush()
+            if pair >= 0.99:
+                print(f"MILESTONE {name} PASS at step {step}", flush=True)
+                torch.save(model.state_dict(), STATE)
+                # regression sweep: later adjustments must not break
+                # earlier passes; brief corrective block if they did
+                sweep = []
+                for p2 in PIECE_ORDER[:PIECE_ORDER.index(piece) + 1]:
+                    n2 = chess.piece_name(p2)
+                    pr, fails = eval_piece(model, p2, n=48)
+                    if pr < 0.98:
+                        for fen, sq, lt, it, gap in fails[:60]:
+                            HARD_SLOT_W[sq * 64 + lt] = 6.0
+                            HARD_SLOT_W[sq * 64 + it] = 4.0
+                        train_stage(model, opt, 1, 50,
+                                    random.Random(2000 + p2), piece=p2)
+                        pr, _ = eval_piece(model, p2, n=48)
+                    sweep.append(f"{n2}={round(pr, 3)}")
+                print("REGRESSION-SWEEP " + " ".join(sweep), flush=True)
+                break
+            if step < 100:
+                best = max(best, pair)         # burn-in: learn to move first
+                continue
+            if pair <= best + 0.001:
+                stall += 1
+            else:
+                stall = 0
+                best = pair
+            if stall >= 8:
+                print(f"MILESTONE {name} STOP at step {step} "
+                      f"(best {best:.3f}, now {pair:.3f}) — failures:",
+                      flush=True)
+                for fen, sq, lt, it, gap in failures[:10]:
+                    print(f"  FAIL {fen} sq={chess.square_name(sq)} "
+                          f"legal={chess.square_name(lt)} "
+                          f"illegal={chess.square_name(it)} gap={gap}",
+                          flush=True)
+                # ADJUST: boost the failing slots (legal target + the
+                # overconfident illegal target) and continue, don't exit
+                for fen, sq, lt, it, gap in failures[:80]:
+                    HARD_SLOT_W[sq * 64 + lt] = 6.0
+                    HARD_SLOT_W[sq * 64 + it] = 4.0
+                stall = 0
+                best = max(best, pair)
+                continue
+    torch.save(model.state_dict(), STATE)
+    print("STAGE 1 ALL MILESTONES PASSED", flush=True)
+    return True
 
 
 def main_tb(steps):
@@ -823,6 +941,10 @@ def main():
     elif os.environ.get("FRESH", "0") == "1":
         print("FRESH weights (from-scratch arm)", flush=True)
     opt = torch.optim.Adam(model.parameters(), lr=3e-4)
+    if stage == 1:
+        rngm = random.Random(1000)
+        milestone_stage1(model, opt)
+        return
     rng = random.Random(1000 + stage)
     train_stage(model, opt, stage, steps, rng)
     while True:

@@ -439,11 +439,12 @@ def gate_stage(model, stage, rng):
         neg = [j for j in range(K) if y[j] == 0]
         if not pos or not neg:
             continue
-        row = T_all[leg_idx[r]]
+        row = T_all[leg_idx[r]]                  # (4096,) slot space
+        srow = slotb[leg_idx[r]]                 # move-list j -> slot
         for p in pos[:3]:
             for q in neg[:3]:
                 tot_pair += 1
-                ok_pair += int(row[p] > row[q])
+                ok_pair += int(row[srow[p]] > row[srow[q]])
     pair = ok_pair / max(tot_pair, 1)
     mv = tgtb >= 0
     if int(mv.sum()):
@@ -456,7 +457,182 @@ def gate_stage(model, stage, rng):
 
 
 STAGE_GATE = {1: (0.99, None), 2: (0.99, None), 3: (0.99, 1.00),
-              4: (0.99, 1.00), 5: (None, 1.00)}
+              4: (0.99, 1.00), 5: (None, 1.00), 6: (None, 0.98)}
+
+# ---------------- stage 6: tablebase-graded endings ----------------
+# operator rule: reinforce the best move, but grade every move by its state
+# change — a no-progress tempo is worse than progress, progress-wasting is
+# worse still, crossing the dtz>=100 counter LOSES the win (draw-level),
+# losing the win outright is -0.6, and in lost positions longer resistance
+# is less bad.
+
+CAT_V = {"win": 1.0, "cursed_win": 0.5, "draw": 0.0,
+         "cursed_loss": -0.5, "loss": -1.0}
+CLS_MAP = {"win": 2, "cursed_win": 2, "draw": 1, "cursed_loss": 0, "loss": 0}
+POOL_DIR = "/home/spec/chess-lab/tbpools"
+
+
+def load_pools(names):
+    import glob as _g
+    rows = []
+    for nm in names:
+        for p in _g.glob(f"{POOL_DIR}/{nm}.jsonl"):
+            with open(p) as f:
+                for line in f:
+                    try:
+                        rows.append(json.loads(line))
+                    except Exception:
+                        pass
+    print(f"pools {names}: {len(rows)} exact-labeled positions", flush=True)
+    return rows
+
+
+def graded_targets(entry, b):
+    """Per-legal-move value targets from the tablebase children."""
+    cat = entry["cat"]
+    ch = entry.get("children", {})
+    opt = {"win": "loss", "cursed_win": "loss", "draw": "draw",
+           "cursed_loss": "win", "loss": "win"}[cat]
+    # child category is from the OPPONENT's perspective; flip to ours
+    def ours(c):
+        return {"win": "loss", "loss": "win", "draw": "draw",
+                "cursed_win": "cursed_loss", "cursed_loss": "cursed_win"}[c]
+    vals = {}
+    child_ours = {}
+    for uci, c in ch.items():
+        cc = c.get("cat")
+        if cc is None:
+            continue
+        o = ours(cc)
+        dtz = c.get("dtz")
+        child_ours[uci] = (o, dtz if dtz is not None else 99)
+    if cat in ("win", "cursed_win"):
+        winners = [(u, d) for u, (o, d) in child_ours.items() if o == "loss"]
+        best_dtz = min((d for _, d in winners), default=99)
+        for u, (o, d) in child_ours.items():
+            if o == "loss":
+                if d >= 98:                    # counter cliff: win evaporates
+                    vals[u] = -0.4
+                else:
+                    vals[u] = 1.0 - min(d - best_dtz, 30) * 0.02
+            elif o == "draw":
+                vals[u] = -0.6                 # lost the win
+            else:
+                vals[u] = -1.0                 # lost the game
+    elif cat == "draw":
+        for u, (o, d) in child_ours.items():
+            if o == "draw":
+                vals[u] = 0.6                  # hold the draw
+            else:
+                vals[u] = -1.0                 # drifted into loss
+    else:                                      # lost: resist longest
+        for u, (o, d) in child_ours.items():
+            if o == "win":
+                vals[u] = -1.0 + min(d, 100) / 250.0
+            elif o == "draw":
+                vals[u] = 0.4                  # salvation draw
+            else:
+                vals[u] = 0.6
+    return vals
+
+
+def build_tb_batch(rng, rows, batch):
+    buf = []
+    while len(buf) < batch:
+        e = rows[rng.randrange(len(rows))]
+        try:
+            b = chess.Board(e["fen"])
+            if b.is_game_over():
+                continue
+            buf.append((b, e))
+        except Exception:
+            continue
+    fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in buf])
+    slots = []
+    tgts = []
+    clb = np.array([CLS_MAP.get(e["cat"], 1) for _, e in buf], dtype=np.int64)
+    bests = []
+    for b, e in buf:
+        mvs = list(b.legal_moves)
+        ch = e.get("children", {})
+        tv = graded_targets(e, b)
+        sv, vv, best = [], [], None
+        for mv in mvs:
+            u = mv.uci()
+            if u in tv:
+                sv.append(mv.from_square * 64 + mv.to_square)
+                vv.append(tv[u])
+            if u == e["best"]:
+                best = len(sv) - 1
+        slots.append((np.array(sv, dtype=np.int64),
+                      np.array(vv, dtype=np.float32)))
+        tgts.append(best if best is not None else -1)
+        bests.append(1)
+    cl = torch.from_numpy(clb).to(DEV)
+    return fvb, slots, tgts, cl
+
+
+def tb_step(model, opt, rows, rng):
+    fvb, slots, tgts, cl = build_tb_batch(rng, rows, B)
+    a = model.propagate(fvb)
+    Bn = a.shape[1]
+    cols = torch.arange(Bn, device=DEV).unsqueeze(1)
+    cls = model.theta_cls.unsqueeze(0) * torch.tanh(a[model.cls_idx].T / 4.0)
+    loss_cls = torch.nn.functional.cross_entropy(cls, cl)
+    # per-move value regression on raw slot logits
+    losses = []
+    ce_terms = []
+    for i, (sv, vv) in enumerate(slots):
+        if len(sv) < 2:
+            continue
+        s = torch.from_numpy(sv).to(DEV)
+        t = torch.from_numpy(vv).to(DEV)
+        Trow = model.theta[s] * a[model.readout_idx[s], i] \
+            + torch.zeros(len(s), device=DEV)
+        losses.append(torch.nn.functional.huber_loss(Trow, t, delta=0.5))
+    loss_val = torch.stack(losses).mean() if losses else torch.zeros((), device=DEV)
+    loss = loss_val * 2.0 + loss_cls
+    opt.zero_grad()
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    opt.step()
+    return float(loss.item())
+
+
+def gate_tb(model, rows, rng):
+    """Gate: argmax(value head) ∈ optimal-move set on held-out entries."""
+    model.eval()
+    ok = tot = 0
+    with torch.no_grad():
+        for _ in range(400):
+            e = rows[rng.randrange(len(rows))]
+            try:
+                b = chess.Board(e["fen"])
+            except Exception:
+                continue
+            if b.is_game_over():
+                continue
+            mvs = list(b.legal_moves)
+            if not mvs:
+                continue
+            fv, _ = flyfeat_cb.feat_vec(b)
+            a = model.propagate(fv[None, :])
+            s = torch.tensor([m.from_square * 64 + m.to_square
+                              for m in mvs], device=DEV)
+            T = model.theta[s] * a[model.readout_idx[s], 0]
+            pick = mvs[int(torch.argmax(T))]
+            # optimal set: moves whose child category preserves the outcome
+            ch = e.get("children", {})
+            opt = {"win": "loss", "cursed_win": "loss", "draw": "draw",
+                   "cursed_loss": "win", "loss": "win"}[e["cat"]]
+            optset = {u for u, c in ch.items()
+                      if {"win": "loss", "loss": "win", "draw": "draw",
+                          "cursed_win": "cursed_loss",
+                          "cursed_loss": "cursed_win"}.get(c.get("cat")) == opt}
+            tot += 1
+            ok += int(pick.uci() in optset)
+    model.train()
+    return ok / max(tot, 1), tot
 
 
 def main():

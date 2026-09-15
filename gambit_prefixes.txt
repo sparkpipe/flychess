@@ -1,0 +1,31 @@
+King's Gambit complex:1\. e4 e5 2\. f4
+Evans Gambit:1\. e4 e5 2\. Nf3 Nc6 3\. Bc4 Bc5 4\. b4
+Danish:1\. e4 e5 2\. d4 exd4 3\. c3
+Scotch Gambit:1\. e4 e5 2\. Nf3 Nc6 3\. d4 exd4 4\. Bc4
+Italian Gambit:1\. e4 e5 2\. Nf3 Nc6 3\. Bc4 Bc5 4\. d4
+Two Knights:1\. e4 e5 2\. Nf3 Nc6 3\. Bc4 Nf6 4\. (Ng5|d4)
+Vienna Gambit:1\. e4 e5 2\. Nc3 Nf6 3\. f4
+Halloween:1\. e4 e5 2\. Nc3 Nf6 3\. Nxe5
+Belgrade:1\. e4 e5 2\. Nc3 Nf6 3\. d4 exd4 4\. Nxe5
+Urusov:1\. e4 e5 2\. Bc4 Nf6 3\. d4
+Center Gambit:1\. e4 e5 2\. d4 exd4 3\. Qxd4
+Ponziani:1\. e4 e5 2\. Nf3 Nc6 3\. c3
+Smith-Morra:1\. e4 c5 2\. d4 cxd4 3\. c3
+Wing Sicilian:1\. e4 c5 2\. b4
+Milner-Barry:1\. e4 e6 2\. d4 d5 3\. e5 c5 4\. c3
+Wing French:1\. e4 e6 2\. b4
+Icelandic:1\. e4 d5 2\. exd5 Nf6 3\. c4
+Nimzowitsch:1\. e4 Nc6 2\. d4 e5
+Stafford:1\. e4 e5 2\. Nf3 Nf6 3\. Nxe5
+Blackmar:1\. d4 d5 2\. e4
+Rousseau:1\. e4 e5 2\. Nf3 f6
+Latvian:1\. e4 e5 2\. Nf3 f5
+Elephant:1\. e4 e5 2\. Nf3 d6 3\. d4
+Ruy-Marshall:1\. e4 e5 2\. Nf3 Nc6 3\. Bb5 a6 4\. Ba4 Nf6 5\. O-O Be7 6\. Re1 b5
+Budapest:1\. d4 Nf6 2\. c4 e5
+Englund:1\. d4 e5( |$)
+Albin:1\. d4 d5 2\. c4 e5
+Benko:1\. d4 Nf6 2\. c4 c5 3\. d5 b5
+Blumenfeld:1\. d4 Nf6 2\. c4 e6 3\. Nf3 c5 4\. d5 b5
+Chigorin:1\. d4 d5 2\. c4 Nc6
+Baltic:1\. d4 d5 2\. c4 Bf5

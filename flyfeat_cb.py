@@ -170,9 +170,14 @@ def feat_vec(board):
     return np.array([d.get(k, 0.0) for k in FEATURE_KEYS], dtype=np.float32), cb
 
 
+MOVE_DIMS = 17
+
+
 def move_feats(board, mv):
-    """Relative move features (board canonical)."""
-    g = np.zeros(8, dtype=np.float32)
+    """Move features: tactical context + RELATIVE DISPLACEMENT geometry
+    (df/dr/same-line/diagonal/knight-shape/edge distances) — the shared
+    basis that lets movement rules generalize across all 64x64 slots."""
+    g = np.zeros(MOVE_DIMS, dtype=np.float32)
     g[0] = 1.0 if board.is_capture(mv) else 0.0
     g[1] = 1.0 if board.gives_check(mv) else 0.0
     g[2] = 1.0 if mv.promotion else 0.0
@@ -184,7 +189,48 @@ def move_feats(board, mv):
     g[5] = int(board.attackers_mask(not board.turn, mv.to_square)).bit_count() / 4.0
     g[6] = int(board.attackers_mask(board.turn, mv.to_square)).bit_count() / 4.0
     g[7] = 1.0 if board.is_into_check(mv) else (-1.0 if board.gives_check(mv) else 0.0)
+    fr, to = mv.from_square, mv.to_square
+    df = chess.square_file(to) - chess.square_file(fr)
+    dr = chess.square_rank(to) - chess.square_rank(fr)
+    g[8] = df / 7.0
+    g[9] = dr / 7.0                       # forward is + (canonical up)
+    g[10] = abs(df) / 7.0
+    g[11] = abs(dr) / 7.0
+    g[12] = 1.0 if df == 0 else 0.0        # same file
+    g[13] = 1.0 if dr == 0 else 0.0        # same rank
+    g[14] = 1.0 if abs(df) == abs(dr) and df != 0 else 0.0   # diagonal
+    g[15] = 1.0 if {abs(df), abs(dr)} == {1, 2} else 0.0     # knight shape
+    g[16] = min(chess.square_file(to), 7 - chess.square_file(to),
+                chess.square_rank(to), 7 - chess.square_rank(to)) / 3.0
     return g
+
+
+SLOT_GEO = None
+
+
+def slot_geo():
+    """(4096, 10) constant geometric basis per (from,to) slot: the shared
+    displacement signal for the legality head."""
+    global SLOT_GEO
+    if SLOT_GEO is None:
+        rows = []
+        for fr in range(64):
+            for to in range(64):
+                if fr == to:
+                    rows.append(np.zeros(10, dtype=np.float32))
+                    continue
+                df = (to % 8) - (fr % 8)
+                dr = (to // 8) - (fr // 8)
+                rows.append(np.array([
+                    df / 7.0, dr / 7.0, abs(df) / 7.0, abs(dr) / 7.0,
+                    1.0 if df == 0 else 0.0, 1.0 if dr == 0 else 0.0,
+                    1.0 if abs(df) == abs(dr) and df != 0 else 0.0,
+                    1.0 if {abs(df), abs(dr)} == {1, 2} else 0.0,
+                    min(to % 8, 7 - to % 8, to // 8, 7 - to // 8) / 3.0,
+                    min(fr % 8, 7 - fr % 8, fr // 8, 7 - fr // 8) / 3.0],
+                    dtype=np.float32))
+        SLOT_GEO = np.stack(rows)
+    return SLOT_GEO
 
 
 if __name__ == "__main__":

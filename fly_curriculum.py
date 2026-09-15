@@ -77,7 +77,11 @@ class FlyCB(torch.nn.Module):
         self.W_sens = torch.nn.Linear(n_feats, len(sens))
         self.inj_idx = self.sensory_idx          # default: periphery
         self.theta = torch.nn.Parameter(torch.zeros(4096))
-        self.theta_mv = torch.nn.Parameter(torch.zeros(8))
+        # shared displacement basis: movement rules generalize across slots
+        self.geo_w = torch.nn.Linear(10, 1)
+        self.register_buffer("slot_geo",
+                             torch.from_numpy(flyfeat_cb.slot_geo()))
+        self.theta_mv = torch.nn.Parameter(torch.zeros(flyfeat_cb.MOVE_DIMS))
         self.theta_cls = torch.nn.Parameter(torch.zeros(3))
         self.cls_idx = torch.from_numpy(free[p2[4096:4099]].astype(np.int64)).to(DEV)
         self.readout_mode = readout
@@ -131,8 +135,10 @@ class FlyCB(torch.nn.Module):
         return a
 
     def logits_all(self, a):
-        """(B, 4096) slot logits — used by legality BCE and move CE."""
-        return self.theta.unsqueeze(0) * a[self.readout_idx].T
+        """(B, 4096) slot logits: position-modulated readout + SHARED
+        geometric displacement basis (the relative-view signal)."""
+        geo = self.geo_w(self.slot_geo).squeeze(-1)     # (4096,)
+        return self.theta.unsqueeze(0) * a[self.readout_idx].T + geo
 
 
 # ---------------- procedural generators ----------------

@@ -9,8 +9,17 @@ Material menu: KPvK KQvK KRvK KPvKP KRvKP KRPvKR KBvKP KRvKB KRvKN
 """
 import sys, json, time, random, urllib.request, urllib.parse, chess
 
-API = "https://tablebase.lichess.ovh/standard"
+TB_DIR = "/home/spec/syzygy"
 POOL_DIR = "/home/spec/chess-lab/tbpools"
+_TB = None
+
+
+def tb():
+    global _TB
+    if _TB is None:
+        import chess.syzygy
+        _TB = chess.syzygy.open_tablebase(TB_DIR)
+    return _TB
 
 MATERIAL = {
     "KPvK":  [(chess.PAWN, "w")],
@@ -24,6 +33,15 @@ MATERIAL = {
     "KBvKP": [(chess.BISHOP, "w"), (chess.PAWN, "b")],
     "KRvKB": [(chess.ROOK, "w"), (chess.BISHOP, "b")],
     "KRvKN": [(chess.ROOK, "w"), (chess.KNIGHT, "b")],
+    "KNvKN": [(chess.KNIGHT, "w"), (chess.KNIGHT, "b")],
+    "KQvKP": [(chess.QUEEN, "w"), (chess.PAWN, "b")],
+    "KQvKR": [(chess.QUEEN, "w"), (chess.ROOK, "b")],
+    "KQvKB": [(chess.QUEEN, "w"), (chess.BISHOP, "b")],
+    "KQvKN": [(chess.QUEEN, "w"), (chess.KNIGHT, "b")],
+    "KBvKB": [(chess.BISHOP, "w"), (chess.BISHOP, "b")],
+    "KBvKN": [(chess.BISHOP, "w"), (chess.KNIGHT, "b")],
+    "KRvKR": [(chess.ROOK, "w"), (chess.ROOK, "b")],
+    "KBBvK": [(chess.BISHOP, "w"), (chess.BISHOP, "w")],
 }
 
 
@@ -48,15 +66,29 @@ def sample_board(name, rng):
                     return b
 
 
-def probe(fen, tries=3):
-    url = API + "?" + urllib.parse.urlencode({"fen": fen})
-    for a in range(tries):
+def probe(board):
+    """Local Syzygy probe -> same dict shape as the old API result."""
+    try:
+        wdl = tb().probe_wdl(board)
+        dtz = tb().probe_dtz(board)
+    except Exception:
+        return None
+    cat = {2: "win", 0: "draw", -2: "loss"}.get(wdl)
+    if cat is None:
+        return None
+    moves = []
+    for mv in board.legal_moves:
+        b2 = board.copy(stack=False)
+        b2.push(mv)
         try:
-            with urllib.request.urlopen(url, timeout=15) as r:
-                return json.load(r)
+            w2 = tb().probe_wdl(b2)
+            z2 = tb().probe_dtz(b2)
         except Exception:
-            time.sleep(1.0 + a)
-    return None
+            continue
+        moves.append({"uci": mv.uci(),
+                      "category": {2: "loss", 0: "draw", -2: "win"}.get(w2),
+                      "dtz": z2, "dtm": None})
+    return {"category": cat, "dtz": dtz, "moves": moves}
 
 
 def main():
@@ -74,43 +106,45 @@ def main():
         pass
     print(f"{name}: pool has {have}, want {want}", flush=True)
     out = open(path, "a")
-    reqs = 0
     t0 = time.time()
-    while have < want:
-        b = sample_board(name, rng)
-        if b is None:
-            continue
-        d = probe(b.fen())
-        reqs += 1
-        if d is None or d.get("category") is None:
-            continue
-        cat = d["category"]                    # mover perspective
-        moves = d.get("moves") or []
-        if not moves:
-            continue
-        # best move: optimal child category + min DTZ
-        opt = {"win": "loss", "loss": "win", "draw": "draw"}[cat]
-        cands = [m for m in moves if m.get("category") == opt]
-        if not cands:
-            continue
-        best = min(cands, key=lambda m: m.get("dtz") or 99)
-        # FULL graded move vector: per legal move, the child category + DTZ
-        # (both from the mover's perspective) -> graded state-change targets:
-        #   no-progress tempo, progress-wasting, the dtz>=100 win-evaporation
-        #   cliff, and lost-win/lost-draw catastrophes.
-        children = {m["uci"]: {"cat": m.get("category"),
-                               "dtz": m.get("dtz"),
-                               "dtm": m.get("dtm")} for m in moves}
-        out.write(json.dumps({"fen": b.fen(), "best": best["uci"],
-                              "cat": cat, "dtz": d.get("dtz"),
-                              "dtm": d.get("dtm"),
-                              "children": children}) + "\n")
-        have += 1
-        if have % 500 == 0:
-            out.flush()
-            print(f"{name}: {have}/{want} "
-                  f"({reqs/(time.time()-t0):.0f} req/s)", flush=True)
-        time.sleep(0.03)
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(_):
+        lrng = random.Random(hash(name) ^ threading.get_ident() * 7919)
+        while True:
+            b = sample_board(name, lrng)
+            if b is None:
+                continue
+            d = probe(b)                     # local syzygy probe
+            if d is None or d.get("category") is None:
+                time.sleep(0.01)
+                continue
+            cat = d["category"]
+            moves = d.get("moves") or []
+            if not moves:
+                continue
+            opt = {"win": "loss", "loss": "win", "draw": "draw"}[cat]
+            cands = [m for m in moves if m.get("category") == opt]
+            if not cands:
+                continue
+            best = min(cands, key=lambda m: m.get("dtz") or 99)
+            children = {m["uci"]: {"cat": m.get("category"),
+                                   "dtz": m.get("dtz"),
+                                   "dtm": m.get("dtm")} for m in moves}
+            return json.dumps({"fen": b.fen(), "best": best["uci"],
+                               "cat": cat, "dtz": d.get("dtz"),
+                               "dtm": d.get("dtm"),
+                               "children": children}) + "\n"
+
+    import threading
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        for line in ex.map(one, range(want - have)):
+            out.write(line)
+            have += 1
+            if have % 1000 == 0:
+                out.flush()
+                print(f"{name}: {have}/{want} "
+                      f"({have/(time.time()-t0):.0f}/s)", flush=True)
     out.close()
     print(f"{name} POOL-DONE {have}", flush=True)
 

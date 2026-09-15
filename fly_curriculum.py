@@ -459,6 +459,37 @@ def gate_stage(model, stage, rng):
 STAGE_GATE = {1: (0.99, None), 2: (0.99, None), 3: (0.99, 1.00),
               4: (0.99, 1.00), 5: (None, 1.00), 6: (None, 0.98)}
 
+
+def main_tb(steps):
+    """Stage 6: exact tablebase endings, graded move-value training."""
+    rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP"])
+    v3.feat_vec(chess.Board())
+    flyfeat_cb.feat_vec(chess.Board())
+    model = FlyCB(len(flyfeat_cb.FEATURE_KEYS)).to(DEV)
+    if os.path.exists(STATE):
+        model.load_state_dict(torch.load(STATE, weights_only=True))
+        print("resumed", flush=True)
+    opt = torch.optim.Adam(model.parameters(), lr=3e-4)
+    rng = random.Random(6000)
+    t0 = time.time()
+    step = 0
+    while True:
+        for _ in range(500):
+            step += 1
+            l = tb_step(model, opt, rows, rng)
+        torch.save(model.state_dict(), STATE + ".tmp")
+        os.replace(STATE + ".tmp", STATE)
+        pair_gate, top = gate_tb(model, rows, random.Random(777))
+        rec = {"stage": 6, "step": step, "loss": round(l, 4),
+               "opt_set": round(pair_gate, 4),
+               "pass": bool(pair_gate >= 0.98)}
+        print(json.dumps(rec), flush=True)
+        with open(LOGF, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+        if rec["pass"]:
+            print("STAGE 6 PASSED — tablebase endings internalized", flush=True)
+            break
+
 # ---------------- stage 6: tablebase-graded endings ----------------
 # operator rule: reinforce the best move, but grade every move by its state
 # change — a no-progress tempo is worse than progress, progress-wasting is
@@ -639,6 +670,9 @@ def main():
     stage = int(sys.argv[1])
     steps = int(sys.argv[sys.argv.index("--steps") + 1]) if "--steps" in sys.argv \
         else 4000
+    if stage == 6:
+        main_tb(steps)
+        return
     v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
     model = FlyCB(len(flyfeat_cb.FEATURE_KEYS)).to(DEV)

@@ -154,11 +154,13 @@ def fresh_kings(rng, dmin=4):
 
 
 def make_board(rng, pieces):
-    """pieces = [(sq, pt, color)]; returns None if invalid/dead/over."""
+    """pieces = [(sq, pt, color)]; rejects only broken/checkmate/stalemate
+    boards. NOT insufficient material — K+B/K+N vs K boards are exactly the
+    stage-1/2 training positions (is_game_over() would reject them all)."""
     b = chess.Board(None)
     for sq, pt, col in pieces:
         b.set_piece_at(sq, chess.Piece(pt, col))
-    if not b.is_valid() or b.is_game_over():
+    if not b.is_valid() or b.is_checkmate() or b.is_stalemate():
         return None
     return b
 

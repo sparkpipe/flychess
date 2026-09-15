@@ -68,7 +68,9 @@ class FlyCB(torch.nn.Module):
         rng = np.random.default_rng(20260912)
         free = np.setdiff1d(np.arange(m.shape[0]), sens)
         p2 = rng.permutation(len(free))
-        self.readout_idx = torch.from_numpy(free[p2[:4096]].astype(np.int64)).to(DEV)
+        self.register_buffer("readout_idx",
+                             torch.from_numpy(free[p2[:4096]].astype(np.int64)))
+        self.readout_idx = self.readout_idx.to(DEV)
         mt = m.T.tocsr()
         self.WT = torch.sparse_csr_tensor(
             torch.from_numpy(mt.indptr.astype(np.int64)),
@@ -83,7 +85,9 @@ class FlyCB(torch.nn.Module):
                              torch.from_numpy(flyfeat_cb.slot_geo()))
         self.theta_mv = torch.nn.Parameter(torch.zeros(flyfeat_cb.MOVE_DIMS))
         self.theta_cls = torch.nn.Parameter(torch.zeros(3))
-        self.cls_idx = torch.from_numpy(free[p2[4096:4099]].astype(np.int64)).to(DEV)
+        self.register_buffer("cls_idx",
+                             torch.from_numpy(free[p2[4096:4099]].astype(np.int64)))
+        self.cls_idx = self.cls_idx.to(DEV)
         self.readout_mode = readout
         if wiring:
             # inject DIRECTLY at the assigned anatomical sites (bypasses the
@@ -417,7 +421,8 @@ def build_batch(rng, stage, batch, piece=None):
     boards_specs = gen_stage(rng, stage, batch, piece=piece)
     fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
     slotb = np.zeros((len(boards_specs), MAXL), np.int64)
-    mfb = np.zeros((len(boards_specs), MAXL, 8), np.float32)
+    mfb = np.zeros((len(boards_specs), MAXL, flyfeat_cb.MOVE_DIMS),
+                    np.float32)
     maskb = np.zeros((len(boards_specs), MAXL), bool)
     tgtb = np.full(len(boards_specs), -1, dtype=np.int64)
     clb = np.zeros(len(boards_specs), dtype=np.int64)
@@ -588,7 +593,7 @@ def milestone_stage1(model, opt):
         rng = random.Random(1000 + piece)
         for step in range(1, 6001):                 # hard cap per piece
             train_stage(model, opt, 1, 1, rng, piece=piece)
-            pair, failures = eval_piece(model, piece, n=32)
+            pair, failures = eval_piece(model, piece, n=96)
             if step % 20 == 0 or pair >= 0.99 or (stall >= 1):
                 rec = {"milestone": name, "step": step,
                        "pair": round(pair, 4)}
@@ -600,18 +605,34 @@ def milestone_stage1(model, opt):
                 # regression sweep: later adjustments must not break
                 # earlier passes; brief corrective block if they did
                 sweep = []
+                blocked = None
                 for p2 in PIECE_ORDER[:PIECE_ORDER.index(piece) + 1]:
                     n2 = chess.piece_name(p2)
-                    pr, fails = eval_piece(model, p2, n=48)
-                    if pr < 0.98:
+                    pr, fails = eval_piece(model, p2, n=96)
+                    for rnd in range(3):            # sweep BLOCKS progression
+                        if pr >= 0.98:
+                            break
                         for fen, sq, lt, it, gap in fails[:60]:
                             HARD_SLOT_W[sq * 64 + lt] = 6.0
                             HARD_SLOT_W[sq * 64 + it] = 4.0
-                        train_stage(model, opt, 1, 50,
-                                    random.Random(2000 + p2), piece=p2)
-                        pr, _ = eval_piece(model, p2, n=48)
+                        train_stage(model, opt, 1, 100,
+                                    random.Random(2000 + p2 + rnd), piece=p2)
+                        pr, fails = eval_piece(model, p2, n=96)
+                    if pr < 0.98:
+                        blocked = (n2, pr, fails)
                     sweep.append(f"{n2}={round(pr, 3)}")
                 print("REGRESSION-SWEEP " + " ".join(sweep), flush=True)
+                if blocked:
+                    n2, pr, fails = blocked
+                    print(f"SWEEP-BLOCKED {n2} at {pr:.3f} — failures:",
+                          flush=True)
+                    for fen, sq, lt, it, gap in fails[:10]:
+                        print(f"  FAIL {fen} sq={chess.square_name(sq)} "
+                              f"legal={chess.square_name(lt)} "
+                              f"illegal={chess.square_name(it)} gap={gap}",
+                              flush=True)
+                    torch.save(model.state_dict(), STATE)
+                    return False                # protocol: stop, adjust
                 break
             if step < 100:
                 best = max(best, pair)         # burn-in: learn to move first
@@ -646,6 +667,7 @@ def milestone_stage1(model, opt):
 def main_tb(steps):
     """Stage 6: exact tablebase endings, graded move-value training."""
     rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP"])
+    torch.manual_seed(0)                     # deterministic init + selection
     v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
     readout = os.environ.get("READOUT", "random")
@@ -898,6 +920,7 @@ def main():
     if stage == 6:
         main_tb(steps)
         return
+    torch.manual_seed(0)                     # deterministic init + selection
     v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
     readout = os.environ.get("READOUT", "random")

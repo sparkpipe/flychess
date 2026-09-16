@@ -366,7 +366,7 @@ def gen_stage(rng, stage, batch, piece=None):
                 # operator ruling: the impulse is ALWAYS to push at this
                 # level — attacked promotion squares stay in the data as
                 # distractors; suppression is a later layer's job
-                push = chess.Move(my_sq, ahead)
+                push = chess.Move(my_sq, ahead, promotion=chess.QUEEN)
                 if push not in b.legal_moves:
                     continue
                 spec = {"leg_sq": my_sq, "cls": 2, "target_mv": push}

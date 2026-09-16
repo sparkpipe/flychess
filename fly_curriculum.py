@@ -81,6 +81,9 @@ class FlyCB(torch.nn.Module):
         self.theta = torch.nn.Parameter(torch.zeros(4096))
         # shared displacement basis: movement rules generalize across slots
         self.geo_w = torch.nn.Linear(10, 1)
+        # from->to binding: target square in the moving piece's attack set
+        # (the additional view that carries piece-to-target relations)
+        self.w_pseudo = torch.nn.Parameter(torch.tensor(0.0))
         self.register_buffer("slot_geo",
                              torch.from_numpy(flyfeat_cb.slot_geo()))
         self.theta_mv = torch.nn.Parameter(torch.zeros(flyfeat_cb.MOVE_DIMS))
@@ -471,20 +474,31 @@ def build_batch(rng, stage, batch, piece=None):
         if "target_mv" in spec:
             tgtb[i] = mvs.index(spec["target_mv"])
         clb[i] = spec.get("cls", 1)
-    return fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots
+    pseudo = np.zeros((len(boards_specs), MAXL), np.float32)
+    for i, (b, spec) in enumerate(boards_specs):
+        mvs = list(b.legal_moves)
+        K = min(len(mvs), MAXL)
+        for j, mv in enumerate(mvs[:K]):
+            pc = b.piece_at(mv.from_square)
+            pseudo[i, j] = 1.0 if (pc and b.attacks_mask(mv.from_square)
+                                   & chess.BB_SQUARES[mv.to_square]) else 0.0
+    return fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots, pseudo
 
 
-def forward(model, fvb, slotb, mfb, maskb):
+def forward(model, fvb, slotb, mfb, maskb, pseudob=None):
     a = model.propagate(fvb)
     Bn = a.shape[1]
     cols = torch.arange(Bn, device=DEV).unsqueeze(1)
     slots = torch.from_numpy(slotb).to(DEV)
+    geo = model.geo_w(model.slot_geo).squeeze(-1)              # (4096,)
     T = model.theta[slots] * a[model.readout_idx[slots], cols] \
-        + torch.from_numpy(mfb).to(DEV) @ model.theta_mv
+        + geo[slots] + torch.from_numpy(mfb).to(DEV) @ model.theta_mv
+    if pseudob is not None:
+        T = T + model.w_pseudo * torch.from_numpy(pseudob).to(DEV)
     T = T.masked_fill(~torch.from_numpy(maskb).to(DEV), -1e9)
     T_all = model.logits_all(a)                                # (B, 4096)
     cls = model.theta_cls.unsqueeze(0) * torch.tanh(a[model.cls_idx].T / 4.0)
-    return torch.log_softmax(T, dim=1), T_all, cls
+    return T, torch.log_softmax(T, dim=1), T_all, cls
 
 
 HARD_SLOT_W = {}                       # (from,to) -> weight boost
@@ -494,25 +508,33 @@ def train_stage(model, opt, stage, steps, rng, piece=None):
     t0 = time.time()
     for step in range(1, steps + 1):
         bb = build_batch(rng, stage, B, piece=piece)
-        fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots = bb
-        logp, T_all, cls = forward(model, fvb, slotb, mfb, maskb)
+        fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots, pseudob = bb
+        T, logp, T_all, cls = forward(model, fvb, slotb, mfb,
+                                      maskb, pseudob)
         loss = 0.0
         if leg_idx:
-            yy = torch.zeros(len(leg_idx), 4096, device=DEV)
-            ww = torch.ones(len(leg_idx), 4096, device=DEV)
+            # per-move legality BCE on the bound logits (with pseudo flag):
+            # legal moves of the queried piece = 1, its others = 0
+            rowsel = []
+            ysel = []
+            wsel = []
             for r, (y, K) in enumerate(leg_slots):
                 if K == 0:
                     continue
-                idx = torch.tensor([int(s) for s in slotb[leg_idx[r], :K]],
-                                   dtype=torch.long, device=DEV)
-                yy[r, idx] = torch.from_numpy(y[:K]).to(DEV)
+                rowsel.append(T[leg_idx[r], :K])
+                ysel.append(torch.from_numpy(y[:K]).to(DEV))
+                wrow = torch.ones(K, device=DEV)
                 for j, s in enumerate(slotb[leg_idx[r], :K]):
                     wboost = HARD_SLOT_W.get(int(s))
                     if wboost:
-                        ww[r, int(s)] = wboost
-            rows = T_all[leg_idx]
-            loss = loss + (torch.nn.functional.binary_cross_entropy_with_logits(
-                rows, yy, reduction="none") * ww).mean()
+                        wrow[j] = wboost
+                wsel.append(wrow)
+            if rowsel:
+                rows = torch.cat(rowsel)
+                yy = torch.cat(ysel)
+                ww = torch.cat(wsel)
+                loss = loss + (torch.nn.functional.binary_cross_entropy_with_logits(
+                    rows, yy, reduction="none") * ww).mean()
         mv = torch.from_numpy(tgtb).to(DEV)
         mvk = mv >= 0
         if int(mvk.sum()):
@@ -540,7 +562,8 @@ def gate_stage(model, stage, rng):
     bb = build_batch(rng, stage, 400)
     fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots = bb
     with torch.no_grad():
-        logp, T_all, cls = forward(model, fvb, slotb, mfb, maskb)
+        T, logp, T_all, cls = forward(model, fvb, slotb, mfb,
+                                      maskb, pseudob)
     ok_pair = tot_pair = 0
     for r, (y, K) in enumerate(leg_slots):
         pos = [j for j in range(K) if y[j] > 0]
@@ -580,9 +603,9 @@ def eval_piece(model, piece, n=64, seed=5000, stage=1):
     fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
     with torch.no_grad():
         a = model.propagate(fvb)
-        T_all = model.logits_all(a)                      # (n, 4096)
     ok = tot = top_ok = 0
     failures = []
+    geo = model.geo_w(model.slot_geo).squeeze(-1).detach().cpu().numpy()
     for i, (b, spec) in enumerate(boards_specs):
         sq = spec["leg_sq"]
         legal = {m.to_square for m in b.legal_moves if m.from_square == sq}
@@ -591,18 +614,28 @@ def eval_piece(model, piece, n=64, seed=5000, stage=1):
         illegal = [t for t in range(64) if t != sq and t not in legal]
         if not illegal:
             continue
-        row = T_all[i]
+        act = a[model.readout_idx.cpu().numpy(), i].detach().cpu().numpy()
+        pc = b.piece_at(sq)
+        def score(t):
+            slot = sq * 64 + t
+            mf = flyfeat_cb.move_feats(b, chess.Move(sq, t)) \
+                if chess.Move(sq, t) in b.pseudo_legal_moves else np.zeros(
+                    flyfeat_cb.MOVE_DIMS, np.float32)
+            pseudo = 1.0 if (pc and b.attacks_mask(sq)
+                             & chess.BB_SQUARES[t]) else 0.0
+            wmv = model.theta_mv.detach().cpu().numpy()
+            return (float(model.theta[slot].detach()) * act[slot]
+                    + geo[slot] + float(mf @ wmv)
+                    + float(model.w_pseudo.detach()) * pseudo)
+        scores = {t: score(t) for t in list(legal)[:4] + illegal[:4]}
         for lt in list(legal)[:4]:
             for it in illegal[:4]:
-                gl = float(row[sq * 64 + lt])
-                gi = float(row[sq * 64 + it])
+                gl = scores[lt]
+                gi = scores[it]
                 tot += 1
                 ok += int(gl > gi)
                 if gl <= gi:
                     failures.append((b.fen(), sq, lt, it, round(gl - gi, 3)))
-        top_ok += int(all(max(row[sq * 64 + t] for t in range(64)
-                              if t != sq) < max(row[sq * 64 + lt]
-                                                for lt in legal) for lt in [max(legal, key=lambda t: row[sq * 64 + t])]))
     return ok / max(tot, 1), failures
 
 
@@ -914,7 +947,8 @@ def main_tb(steps):
     model = FlyCB(len(flyfeat_cb.FEATURE_KEYS),
                   sel_boards=sel, readout=readout, wiring=wiring).to(DEV)
     if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
-        model.load_state_dict(torch.load(STATE, weights_only=True))
+        model.load_state_dict(torch.load(STATE, weights_only=True),
+                              strict=False)
         print("resumed", flush=True)
     elif os.environ.get("FRESH", "0") == "1":
         print("FRESH weights (from-scratch arm)", flush=True)
@@ -1167,7 +1201,8 @@ def main():
     model = FlyCB(len(flyfeat_cb.FEATURE_KEYS),
                   sel_boards=sel, readout=readout, wiring=wiring).to(DEV)
     if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
-        model.load_state_dict(torch.load(STATE, weights_only=True))
+        model.load_state_dict(torch.load(STATE, weights_only=True),
+                              strict=False)
         print("resumed", flush=True)
     elif os.environ.get("FRESH", "0") == "1":
         print("FRESH weights (from-scratch arm)", flush=True)

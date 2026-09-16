@@ -45,3 +45,10 @@ the EDGE OF BOARD is genuinely new signal. Added: per-piece distances to all
 (atk_edge_my/their, 128 dims) → 2746 total. Mirror-invariance verified 0-diff.
 The from-scratch verification run trains with these; the rook rank-1
 failures were exactly this missing concept.
+
+## Image-view contract (parked, operator ruling 2026-09-16)
+Image planes OFF until combined tactics stage. When re-added:
+- normalize image planes to unit variance vs the abstract channel scales
+  AT INJECTION TIME (neither view may dominate the other)
+- re-test at stage 4+ (forks/discovered = where raw detail may add capacity)
+- stage-1 verdict: image view slowed rook 87->218 steps, zero gate benefit

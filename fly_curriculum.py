@@ -240,13 +240,13 @@ def gen_stage(rng, stage, batch, piece=None):
             if not att:
                 continue
             e1 = rng.choice(att)
-            ept = rng.choice([chess.KING, chess.PAWN, chess.KNIGHT,
-                              chess.BISHOP, chess.ROOK, chess.QUEEN])
-            b.set_piece_at(e1, chess.Piece(ept, chess.BLACK))
+            ept = rng.choice([chess.PAWN, chess.KNIGHT, chess.BISHOP,
+                              chess.ROOK, chess.QUEEN])   # no enemy kings:
+            b.set_piece_at(e1, chess.Piece(ept, chess.BLACK))  # s4 concept
             defended = rng.random() < 0.5
             if defended:
-                dpt = rng.choice([chess.KING, chess.PAWN, chess.KNIGHT,
-                                  chess.BISHOP, chess.ROOK, chess.QUEEN])
+                dpt = rng.choice([chess.PAWN, chess.KNIGHT, chess.BISHOP,
+                                  chess.ROOK, chess.QUEEN])
                 defs = []
                 for t in chess.SQUARES:
                     if t in (s, e1) or chess.square_distance(t, e1) != 1:

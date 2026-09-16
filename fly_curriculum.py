@@ -31,6 +31,8 @@ STATE = os.environ.get("STATE", "/home/spec/chess-lab/fly_cb.pt")
 LOGF = "/home/spec/chess-lab/fly_cb_log.jsonl"
 BRAIN = "/home/spec/chess-lab/brain_graph.npz"
 SENS = "/home/spec/chess-lab/sensory_idx.npy"
+ANN = "/home/spec/chess-lab/annotations.feather"
+NODES = "/home/spec/chess-lab/node_ids.npy"
 PROP_STEPS = int(os.environ.get("STEPS", "6"))   # real circuits are 4-7 synapses
 LEAK = float(os.environ.get("LEAK", "0.5"))
 CAP = 20.0
@@ -52,6 +54,47 @@ WIRING_MAP = {
     "castling":    "lateral_horn",
     "en_passant":  "lateral_horn",
     "check_state": "lateral_horn",
+}
+
+
+def build_retino_map(mode="geo", seed=12345):
+    """Board squares -> optic-lobe columns via the real hex retinotopy.
+    8x8 bins from the (hex1, hex2) lattice; mode=shuf permutes square->bin
+    (fungibility control: same site, same neurons, wrong geometry)."""
+    import pandas as pd
+    a = pd.read_feather(ANN)
+    node_ids = np.load(NODES)
+    pos = {int(b): i for i, b in enumerate(node_ids)}
+    m = a.assignedOlHex1.notna() & a.assignedOlHex2.notna() \
+        & a.bodyId.isin(pos)
+    sub = a[m]
+    h1 = sub.assignedOlHex1.values
+    h2 = sub.assignedOlHex2.values
+    bins = {}
+    lo1, hi1 = np.percentile(h1, [20, 80])
+    lo2, hi2 = np.percentile(h2, [20, 80])
+    b1 = np.clip(((h1 - lo1) / max(hi1 - lo1, 1) * 7.999).astype(int), 0, 7)
+    b2 = np.clip(((h2 - lo2) / max(hi2 - lo2, 1) * 7.999).astype(int), 0, 7)
+    for i in range(len(sub)):
+        col = int(b1[i]) * 8 + int(b2[i])
+        nid = pos[int(sub.bodyId.values[i])]
+        bins.setdefault(col, []).append(nid)
+    rng = np.random.default_rng(seed)
+    sq_bins = list(range(64))
+    if mode == "shuf":
+        rng.shuffle(sq_bins)                     # square s -> bin sq_bins[s]
+    out = {}
+    for s in range(64):
+        idx = bins.get(sq_bins[s], [])
+        if len(idx) > 400:
+            idx = list(rng.choice(idx, 400, replace=False))
+        out[s] = np.array(idx, dtype=np.int64)
+    return out
+
+
+SQUARE_FEATS = {          # per-square channels for the retinotopic payload
+    "atk_my_{s}": 0, "atk_their_{s}": 1, "occ_my_{s}": 2,
+    "occ_their_{s}": 3, "net_{s}": 4,
 }
 
 
@@ -134,6 +177,38 @@ class FlyCB(torch.nn.Module):
 
     def propagate(self, fvb):
         x = torch.from_numpy(fvb).to(DEV)
+        if getattr(self, "retino", None) is not None:
+            # geometric overlay: per-square channels -> matched columns,
+            # one trainable gain per channel (tests the built-in wiring,
+            # not extra capacity)
+            if getattr(self, "_sq_idx", None) is None:
+                keys = flyfeat_cb.FEATURE_KEYS
+                sq_idx = {c_: {} for c_ in range(5)}
+                for fi, k in enumerate(keys):
+                    for s_ in range(64):
+                        for pref, c_ in (("atk_my_", 0), ("atk_their_", 1),
+                                         ("occ_my_", 2), ("occ_their_", 3),
+                                         ("net_", 4)):
+                            if k == f"{pref}{s_}":
+                                sq_idx[c_][s_] = fi
+                self._sq_idx = sq_idx
+            sq_idx = self._sq_idx
+            B = x.shape[0]
+            a = torch.zeros(self.N, B, device=DEV)
+            for s_ in range(64):
+                idx = self.retino.get(s_)
+                if idx is None or not len(idx):
+                    continue
+                ti = torch.from_numpy(idx).to(DEV)
+                for c_ in range(5):
+                    fi = sq_idx[c_].get(s_)
+                    if fi is None:
+                        continue
+                    a[ti] = a[ti] + self.retino_gain[c_] * x[:, fi][None, :]
+            for _ in range(PROP_STEPS):
+                a = torch.clamp((1 - LEAK) * a + LEAK * (self.WT @ a),
+                                -CAP, CAP)
+            return a
         w = self.W_sens.weight * self.wmask if self.wmask is not None \
             else self.W_sens.weight
         s = torch.clamp(torch.nn.functional.linear(x, w, self.W_sens.bias),
@@ -1105,6 +1180,12 @@ def main_tb(steps):
     torch.manual_seed(0)                     # deterministic init + selection
     v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
+    retino_mode = os.environ.get("RETINO", "")
+    if retino_mode in ("geo", "shuf"):
+        rmap = build_retino_map(mode=retino_mode)
+        print(f"retino={retino_mode}: "
+              f"{sum(len(v) for v in rmap.values())} neurons / 64 bins",
+              flush=True)
     readout = os.environ.get("READOUT", "random")
     wiring = None
     if os.environ.get("WIRING", "") == "structured":
@@ -1146,6 +1227,9 @@ def main_tb(steps):
                 sel.append(bb)
     model = FlyCB(len(flyfeat_cb.FEATURE_KEYS),
                   sel_boards=sel, readout=readout, wiring=wiring).to(DEV)
+    if retino_mode in ("geo", "shuf"):
+        model.retino = rmap
+        model.retino_gain = torch.nn.Parameter(torch.ones(5) * 2.0).to(DEV)
     if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
         model.load_state_dict(torch.load(STATE, weights_only=True),
                               strict=False)
@@ -1359,6 +1443,12 @@ def main():
     torch.manual_seed(0)                     # deterministic init + selection
     v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
+    retino_mode = os.environ.get("RETINO", "")
+    if retino_mode in ("geo", "shuf"):
+        rmap = build_retino_map(mode=retino_mode)
+        print(f"retino={retino_mode}: "
+              f"{sum(len(v) for v in rmap.values())} neurons / 64 bins",
+              flush=True)
     readout = os.environ.get("READOUT", "random")
     wiring = None
     if os.environ.get("WIRING", "") == "structured":
@@ -1400,6 +1490,9 @@ def main():
                 sel.append(bb)
     model = FlyCB(len(flyfeat_cb.FEATURE_KEYS),
                   sel_boards=sel, readout=readout, wiring=wiring).to(DEV)
+    if retino_mode in ("geo", "shuf"):
+        model.retino = rmap
+        model.retino_gain = torch.nn.Parameter(torch.ones(5) * 2.0).to(DEV)
     if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
         model.load_state_dict(torch.load(STATE, weights_only=True),
                               strict=False)

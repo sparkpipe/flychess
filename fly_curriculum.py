@@ -277,117 +277,116 @@ def gen_stage(rng, stage, batch, piece=None):
             out.append((b, spec))
             continue
         elif stage == 4:
-            mode = rng.choice(["their_king", "my_king", "pin", "fork",
-                               "discovered"])
-            k1, k2 = fresh_kings(rng, 4)
-            if mode in ("their_king", "my_king", "pin"):
-                pt = rng.choice([chess.ROOK, chess.BISHOP, chess.QUEEN])
-                cand = [s for s in range(64) if s not in (k1, k2)]
-                s = rng.choice(cand)
-                pieces = [(k1, chess.KING, chess.WHITE), (s, pt, chess.WHITE),
-                          (k2, chess.KING, chess.BLACK)]
-                if mode == "pin":
-                    # own piece pinned between my king and their slider
-                    slider = rng.choice([chess.ROOK, chess.BISHOP, chess.QUEEN])
-                    dirs = [(1, 0), (-1, 0), (0, 1), (0, -1),
-                            (1, 1), (1, -1), (-1, 1), (-1, -1)]
-                    df, dr = rng.choice(dirs)
-                    kf, kr = chess.square_file(k1), chess.square_rank(k1)
-                    pf, pr = kf + df, kr + dr
-                    sf2, sr2 = kf + 2 * df, kr + 2 * dr
-                    if not (0 <= pf < 8 and 0 <= pr < 8 and 0 <= sf2 < 8
-                            and 0 <= sr2 < 8):
-                        continue
-                    psq = chess.square(pf, pr)
-                    ssq = chess.square(sf2, sr2)
-                    pieces = [(k1, chess.KING, chess.WHITE),
-                              (psq, rng.choice([chess.KNIGHT, chess.BISHOP,
-                                                chess.ROOK, chess.QUEEN]),
-                               chess.WHITE),
-                              (ssq, slider, chess.BLACK),
-                              (k2, chess.KING, chess.BLACK)]
-                b = make_board(rng, pieces)
-                if b is None:
+            # operator spec: king safety, pins, forks, discovered attacks —
+            # projected force and its blocking, with kings proper.
+            mode = (piece if isinstance(piece, str) else None) or \
+                rng.choice(["their_king", "pin", "fork", "discovered"])
+            if mode == "their_king":
+                # my piece + enemy king, ENEMY to move: the enemy king cannot
+                # move to squares my piece controls
+                pt = rng.choice([chess.ROOK, chess.BISHOP, chess.KNIGHT,
+                                 chess.QUEEN])
+                sqs = rng.sample(range(64), 2)
+                b = chess.Board(None)
+                b.set_piece_at(sqs[0], chess.Piece(pt, chess.WHITE))
+                b.set_piece_at(sqs[1], chess.Piece(chess.KING, chess.BLACK))
+                if b.is_attacked_by(chess.WHITE, sqs[1]):
+                    continue                    # enemy king not in check
+                b.turn = chess.BLACK
+                if b.is_game_over() or not any(b.generate_legal_moves()):
                     continue
-                if mode == "their_king":
-                    spec = {"leg_sq": k2, "cls": 1}
-                elif mode == "my_king":
-                    spec = {"leg_sq": k1, "cls": 1}
-                else:
-                    spec = {"leg_sq": pieces[1][0], "cls": 1}
+                spec = {"leg_sq": sqs[1], "cls": 1}
+            elif mode == "pin":
+                # my slider pins an enemy piece to the enemy king; the pinned
+                # piece may only move along the pin line
+                df, dr = rng.choice([(1, 0), (-1, 0), (0, 1), (0, -1),
+                                     (1, 1), (1, -1), (-1, 1), (-1, -1)])
+                slider = (chess.ROOK if df == 0 or dr == 0 else chess.BISHOP)
+                f0, r0 = rng.randrange(1, 7), rng.randrange(1, 7)
+                if not (0 <= f0 + 2 * df < 8 and 0 <= r0 + 2 * dr < 8
+                        and 0 <= f0 - df < 8 and 0 <= r0 - dr < 8):
+                    continue
+                pin_sq = chess.square(f0 + df, r0 + dr)
+                slider_sq = chess.square(f0 + 2 * df, r0 + 2 * dr)
+                ksq = chess.square(f0 - df, r0 - dr)
+                pinned_pt = rng.choice([chess.QUEEN, chess.ROOK, chess.BISHOP,
+                                        chess.KNIGHT])
+                b = chess.Board(None)
+                b.set_piece_at(ksq, chess.Piece(chess.KING, chess.BLACK))
+                b.set_piece_at(pin_sq, chess.Piece(pinned_pt, chess.BLACK))
+                b.set_piece_at(slider_sq, chess.Piece(slider, chess.WHITE))
+                if not (b.attacks_mask(slider_sq) & chess.BB_SQUARES[pin_sq]):
+                    continue                    # pin must be real
+                b.turn = chess.BLACK
+                mv_pin = [m for m in b.legal_moves if m.from_square == pin_sq]
+                if not mv_pin:
+                    continue
+                spec = {"leg_sq": pin_sq, "cls": 1}
             elif mode == "fork":
-                # my knight forks two enemy pieces via one jump
+                # knight jumps TO center, forking t1 and t2 from origin k
                 center = rng.randrange(8, 56)
-                jumps = [d for d in
-                         ((17, 15, 10, 6, -17, -15, -10, -6))]
-                rng.shuffle(jumps)
-                hits = []
-                for d in jumps[:2]:
+                offs = [17, 15, 10, 6, -17, -15, -10, -6]
+                rng.shuffle(offs)
+                def ok(sq, ref):
+                    return 0 <= sq < 64 and abs((sq % 8) - (ref % 8)) <= 2
+                d1, d2 = offs[0], None
+                t1 = center + d1
+                if not ok(t1, center):
+                    continue
+                for d in offs[1:]:
+                    if d == -d1:
+                        continue
                     t = center + d
-                    if 0 <= t < 64 and abs((t % 8) - (center % 8)) <= 2:
-                        hits.append(t)
-                if len(hits) < 2:
+                    if ok(t, center) and t != t1:
+                        d2 = d
+                        break
+                if d2 is None:
                     continue
-                back = center - rng.choice(jumps)
-                if not (0 <= back < 64
-                        and abs((back % 8) - (center % 8)) <= 2):
+                t2 = center + d2
+                k = center - d1
+                if not ok(k, center) or k in (t1, t2):
                     continue
-                pieces = [(k1, chess.KING, chess.WHITE),
-                          (back, chess.KNIGHT, chess.WHITE),
-                          (k2, chess.KING, chess.BLACK),
-                          (hits[0], rng.choice([chess.ROOK, chess.QUEEN]),
-                           chess.BLACK),
-                          (hits[1], rng.choice([chess.ROOK, chess.QUEEN]),
-                           chess.BLACK)]
-                b = make_board(rng, pieces)
-                if b is None:
-                    continue
-                mv = chess.Move(back, center)
+                b = chess.Board(None)
+                b.set_piece_at(k, chess.Piece(chess.KNIGHT, chess.WHITE))
+                b.set_piece_at(t1, chess.Piece(
+                    rng.choice([chess.ROOK, chess.QUEEN]), chess.BLACK))
+                b.set_piece_at(t2, chess.Piece(
+                    rng.choice([chess.ROOK, chess.QUEEN]), chess.BLACK))
+                mv = chess.Move(k, center)
                 if mv not in b.legal_moves:
                     continue
                 spec = {"target_mv": mv, "cls": 2}
             else:  # discovered
+                # my slider behind my piece; moving the piece opens the line
                 df, dr = rng.choice([(1, 0), (-1, 0), (0, 1), (0, -1),
                                      (1, 1), (1, -1), (-1, 1), (-1, -1)])
-                f0 = rng.randrange(0, 8)
-                r0 = rng.randrange(0, 8)
-                sq_slider = chess.square(f0, r0)
-                sq_front = chess.square(min(max(f0 + df, 0), 7),
-                                        min(max(r0 + dr, 0), 7))
-                if sq_front == sq_slider:
+                slider = (chess.ROOK if df == 0 or dr == 0 else chess.BISHOP)
+                f0, r0 = rng.randrange(1, 6), rng.randrange(1, 6)
+                if not (0 <= f0 + 3 * df < 8 and 0 <= r0 + 3 * dr < 8
+                        and 0 <= f0 + df < 8 and 0 <= r0 + dr < 8):
                     continue
-                sq_t = chess.square(min(max(f0 + 3 * df, 0), 7),
-                                    min(max(r0 + 3 * dr, 0), 7))
-                if sq_t in (sq_slider, sq_front, k1, k2):
+                front_sq = chess.square(f0 + df, r0 + dr)
+                slider_sq = chess.square(f0, r0)
+                tgt_sq = chess.square(f0 + 3 * df, r0 + 3 * dr)
+                if tgt_sq in (front_sq, slider_sq):
                     continue
-                slider = rng.choice([chess.ROOK, chess.BISHOP, chess.QUEEN])
-                if slider == chess.BISHOP and (df == 0 or dr == 0):
-                    continue
-                if slider == chess.ROOK and df != 0 and dr != 0:
-                    continue
-                front = rng.choice([chess.KNIGHT, chess.PAWN, chess.BISHOP])
-                if front == chess.PAWN and dr == 0:
-                    continue
-                pieces = [(k1, chess.KING, chess.WHITE),
-                          (sq_slider, slider, chess.WHITE),
-                          (sq_front, front, chess.WHITE),
-                          (sq_t, rng.choice([chess.KNIGHT, chess.BISHOP,
-                                             chess.ROOK]), chess.BLACK),
-                          (k2, chess.KING, chess.BLACK)]
-                b = make_board(rng, pieces)
-                if b is None:
-                    continue
-                cand = [m for m in b.legal_moves if m.from_square == sq_front]
-                if not cand:
-                    continue
-                mv = cand[0] if chess.Move(sq_front, sq_t) in b.legal_moves \
-                    else rng.choice(cand)
-                b.push(mv)
-                opens = bool(board_attacks(b, sq_slider, sq_t))
-                b.pop()
+                front_pt = rng.choice([chess.KNIGHT, chess.ROOK,
+                                       chess.BISHOP])
+                b = chess.Board(None)
+                b.set_piece_at(slider_sq, chess.Piece(slider, chess.WHITE))
+                b.set_piece_at(front_sq, chess.Piece(front_pt, chess.WHITE))
+                b.set_piece_at(tgt_sq, chess.Piece(
+                    rng.choice([chess.ROOK, chess.QUEEN]), chess.BLACK))
+                cands = [m for m in b.legal_moves
+                         if m.from_square == front_sq]
+                # a discovery = front piece moves OFF the slider's ray
+                ray = b.attacks_mask(slider_sq)
+                opens = [m for m in cands
+                         if not (ray & chess.BB_SQUARES[m.to_square])]
                 if not opens:
                     continue
-                spec = {"target_mv": mv, "cls": 2}
+                spec = {"target_mv": rng.choice(opens), "cls": 2}
+            out.append((b, spec))
         elif stage == 5:
             b, tgt = gen_mate1(rng)
             if b is None:
@@ -814,6 +813,173 @@ def milestone_stage3(model, opt):
     return True
 
 
+S4_MODES = ["their_king", "pin", "fork", "discovered"]
+
+
+def eval_ce(model, mode, n=96, seed=7000):
+    """CE-mode battery: argmax over legal moves must pick target_mv."""
+    rng = random.Random(seed + hash(mode) % 9973)
+    boards_specs = gen_stage(rng, 4, n, piece=mode)
+    fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
+    with torch.no_grad():
+        a = model.propagate(fvb)
+    geo = model.geo_w(model.slot_geo).squeeze(-1).detach().cpu().numpy()
+    ok = tot = 0
+    failures = []
+    for i, (b, spec) in enumerate(boards_specs):
+        tgt = spec.get("target_mv")
+        if tgt is None:
+            continue
+        mvs = list(b.legal_moves)
+        if not mvs or tgt not in mvs:
+            continue
+        act = a[model.readout_idx.cpu().numpy(), i].detach().cpu().numpy()
+        pseudo = []
+        scores = []
+        wmv = model.theta_mv.detach().cpu().numpy()
+        wp = float(model.w_pseudo.detach())
+        for mv in mvs:
+            slot = mv.from_square * 64 + mv.to_square
+            mf = flyfeat_cb.move_feats(b, mv)
+            pc = b.piece_at(mv.from_square)
+            ps = 1.0 if (pc and b.attacks_mask(mv.from_square)
+                         & chess.BB_SQUARES[mv.to_square]) else 0.0
+            scores.append(float(model.theta[slot].detach()) * act[slot]
+                          + geo[slot] + float(mf @ wmv) + wp * ps)
+        pick = mvs[int(np.argmax(scores))]
+        tot += 1
+        if pick == tgt:
+            ok += 1
+        else:
+            failures.append((b.fen(), tgt.uci(), pick.uci()))
+    return ok / max(tot, 1), failures
+
+
+def milestone_stage4(model, opt):
+    """Stage 4: concept milestones (their_king, pin = legality gates;
+    fork, discovered = CE argmax gates). Sweeps cover stages 1-4."""
+    logf = open(LOGF, "a")
+
+    def eval_mode(mode, n=96):
+        if mode in ("their_king", "pin"):
+            rng = random.Random(8000 + hash(mode) % 7919)
+            bs = gen_stage(rng, 4, n, piece=mode)
+            return eval_piece_boards(model, bs)
+        return eval_ce(model, mode, n=n)
+
+    for mode in S4_MODES:
+        print(f"=== S4 MILESTONE {mode} ===", flush=True)
+        best = -1.0
+        stall = 0
+        rng = random.Random(9000 + hash(mode) % 104729)
+        for step in range(1, 4001):
+            train_stage(model, opt, 4, 1, rng, piece=mode)
+            pair, failures = eval_mode(mode)
+            if step % 20 == 0 or pair >= 0.99 or (stall >= 1):
+                rec = {"s4_milestone": mode, "step": step,
+                       "score": round(pair, 4)}
+                print(json.dumps(rec), flush=True)
+                logf.write(json.dumps(rec) + "\n"); logf.flush()
+            if pair >= 0.99:
+                print(f"S4 MILESTONE {mode} PASS at step {step}", flush=True)
+                torch.save(model.state_dict(), STATE)
+                # sweep: stages 1-3 all pieces + passed s4 modes
+                parts = []
+                blocked = None
+                for st in (1, 2, 3):
+                    for p2 in PIECE_ORDER:
+                        pr, fails = eval_piece(model, p2, n=64, stage=st)
+                        for rnd in range(3):
+                            if pr >= 0.98:
+                                break
+                            train_stage(model, opt, st, 300,
+                                        random.Random(9500 + st * 31 + p2 + rnd),
+                                        piece=p2)
+                            pr, fails = eval_piece(model, p2, n=64, stage=st)
+                        if pr < 0.98:
+                            blocked = (f"s{st}:{chess.piece_name(p2)}",
+                                       pr, fails)
+                        parts.append(f"s{st}:{chess.piece_name(p2)}={round(pr, 3)}")
+                for m2 in S4_MODES[:S4_MODES.index(mode) + 1]:
+                    pr, fails = eval_mode(m2, n=64)
+                    if pr < 0.98:
+                        blocked = (f"s4:{m2}", pr, fails)
+                    parts.append(f"s4:{m2}={round(pr, 3)}")
+                print("S4 REGRESSION-SWEEP " + " ".join(parts), flush=True)
+                if blocked:
+                    nm, pr, fails = blocked
+                    print(f"S4 SWEEP-BLOCKED {nm} at {pr:.3f}", flush=True)
+                    for f in (fails or [])[:6]:
+                        print(f"  FAIL {f}", flush=True)
+                    torch.save(model.state_dict(), STATE)
+                    return False
+                break
+            if step < 50:
+                best = max(best, pair)
+                continue
+            if pair <= best + 0.001:
+                stall += 1
+            else:
+                stall = 0
+                best = pair
+            if stall >= 8:
+                print(f"S4 MILESTONE {mode} STOP at step {step} "
+                      f"(best {best:.3f}) — failures:", flush=True)
+                for f in (failures or [])[:8]:
+                    print(f"  FAIL {f}", flush=True)
+                stall = 0
+                best = max(best, pair)
+                continue
+            if step == 4000:
+                print(f"S4 MILESTONE {mode} EXHAUSTED (best {best:.3f})",
+                      flush=True)
+                torch.save(model.state_dict(), STATE)
+                return False
+    torch.save(model.state_dict(), STATE)
+    print("STAGE 4 ALL MILESTONES PASSED", flush=True)
+    return True
+
+
+def eval_piece_boards(model, boards_specs):
+    """Pairwise legality eval over a pre-built battery (leg_sq specs)."""
+    fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
+    with torch.no_grad():
+        a = model.propagate(fvb)
+    geo = model.geo_w(model.slot_geo).squeeze(-1).detach().cpu().numpy()
+    ok = tot = 0
+    failures = []
+    wmv = model.theta_mv.detach().cpu().numpy()
+    wp = float(model.w_pseudo.detach())
+    for i, (b, spec) in enumerate(boards_specs):
+        sq = spec.get("leg_sq")
+        if sq is None:
+            continue
+        legal = {m.to_square for m in b.legal_moves if m.from_square == sq}
+        illegal = [t for t in range(64) if t != sq and t not in legal]
+        if not legal or not illegal:
+            continue
+        act = a[model.readout_idx.cpu().numpy(), i].detach().cpu().numpy()
+        pc = b.piece_at(sq)
+        def score(t):
+            slot = sq * 64 + t
+            mvq = chess.Move(sq, t)
+            mf = flyfeat_cb.move_feats(b, mvq) \
+                if mvq in b.pseudo_legal_moves else np.zeros(
+                    flyfeat_cb.MOVE_DIMS, np.float32)
+            ps = 1.0 if (pc and b.attacks_mask(sq)
+                         & chess.BB_SQUARES[t]) else 0.0
+            return (float(model.theta[slot].detach()) * act[slot]
+                    + geo[slot] + float(mf @ wmv) + wp * ps)
+        for lt in list(legal)[:3]:
+            for it in illegal[:3]:
+                tot += 1
+                if score(lt) > score(it):
+                    ok += 1
+                else:
+                    failures.append((b.fen(), sq, lt, it, 0))
+    return ok / max(tot, 1), failures
+
+
 def milestone_stage1(model, opt):
     """Stage 1 as true per-item milestones: eval after EVERY training step
     (one batch = one item), stop the moment the curve turns.
@@ -1216,6 +1382,9 @@ def main():
         return
     if stage == 3:
         milestone_stage3(model, opt)
+        return
+    if stage == 4:
+        milestone_stage4(model, opt)
         return
     rng = random.Random(1000 + stage)
     train_stage(model, opt, stage, steps, rng)

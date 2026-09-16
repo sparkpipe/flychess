@@ -638,7 +638,7 @@ def milestone_stage2(model, opt):
                         for fen, sq, lt, it, gap in fails[:60]:
                             HARD_SLOT_W[sq * 64 + lt] = 6.0
                             HARD_SLOT_W[sq * 64 + it] = 4.0
-                        train_stage(model, opt, 2, 100,
+                        train_stage(model, opt, 2, 300,
                                     random.Random(4000 + p2 + rnd), piece=p2)
                         pr, fails = eval_piece(model, p2, n=96, stage=2)
                     if pr < 0.98:
@@ -703,7 +703,7 @@ def milestone_stage3(model, opt):
                     for fen, sq, lt, it, gap in fails[:60]:
                         HARD_SLOT_W[sq * 64 + lt] = 6.0
                         HARD_SLOT_W[sq * 64 + it] = 4.0
-                    train_stage(model, opt, st, 100,
+                    train_stage(model, opt, st, 300,
                                 random.Random(5000 + st * 31 + p2 + rnd),
                                 piece=p2)
                     pr, fails = eval_piece(model, p2, n=96, stage=st)

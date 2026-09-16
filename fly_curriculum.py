@@ -175,8 +175,22 @@ class FlyCB(torch.nn.Module):
             torch.from_numpy(mt.indptr.astype(np.int64)),
             torch.from_numpy(mt.indices.astype(np.int64)),
             torch.from_numpy(mt.data), size=mt.shape, device=DEV)
-        self.W_sens = torch.nn.Linear(n_feats, len(sens))
-        self.inj_idx = self.sensory_idx          # default: periphery
+        # INJECT env: anatomical site override (A/B/C learning-speed tests)
+        inj_site = os.environ.get("INJECT", "")
+        inj_neurons = sens
+        if inj_site:
+            import wiring_engineer as we
+            sm = we.site_masks(node_ids := np.load(
+                "/home/spec/chess-lab/node_ids.npy"))
+            if inj_site == "lh_kc":
+                inj_neurons = np.concatenate([sm["lateral_horn"],
+                                              sm.get("KC", np.array([], int))])
+            elif inj_site in sm:
+                inj_neurons = sm[inj_site]
+            print(f"INJECT={inj_site}: {len(inj_neurons)} neurons", flush=True)
+        self.W_sens = torch.nn.Linear(n_feats, len(inj_neurons))
+        self.inj_idx = torch.from_numpy(
+            np.asarray(inj_neurons, dtype=np.int64)).to(DEV)
         self.theta = torch.nn.Parameter(torch.zeros(4096))
         # shared displacement basis: movement rules generalize across slots
         self.geo_w = torch.nn.Linear(10, 1)
@@ -1221,6 +1235,9 @@ def eval_piece_boards(model, boards_specs):
         def score(t):
             slot = sq * 64 + t
             mvq = chess.Move(sq, t)
+            if mvq not in b.pseudo_legal_moves and \
+                    pc == chess.PAWN and chess.square_rank(t) in (0, 7):
+                mvq = chess.Move(sq, t, promotion=chess.QUEEN)
             mf = flyfeat_cb.move_feats(b, mvq) \
                 if mvq in b.pseudo_legal_moves else np.zeros(
                     flyfeat_cb.MOVE_DIMS, np.float32)
@@ -1242,6 +1259,74 @@ def eval_piece_boards(model, boards_specs):
                 else:
                     failures.append((b.fen(), sq, lt, it, 0))
     return ok / max(tot, 1), failures
+
+
+def combined_stage(model, opt, cap=30000):
+    """SOUP COOKING per operator spec: merged weights + RANDOMIZED draws from
+    the combined corpus (all 9 batteries). Failing batteries get sampled
+    more (retrain on just the FAIL). Gate: every battery >= 0.99 stable
+    across two consecutive evals. corrections[] counts per-battery
+    corrective focus events -> reported in status."""
+    from collections import Counter
+    logf = open(LOGF, "a")
+    rng = random.Random(31337)
+    weights = {p: 1.0 for p in PIECE_ORDER}
+    stable = set()
+    last_scores = {}
+    corrections = Counter()
+    t0 = time.time()
+
+    def eval_all(model):
+        res = {}
+        for p in PIECE_ORDER:
+            pr, _ = eval_piece(model, p, n=96, stage=1)
+            res[p] = pr
+        return res
+
+    for step in range(1, cap + 1):
+        tot = sum(weights.values())
+        r = rng.random() * tot
+        acc = 0.0
+        piece = PIECE_ORDER[-1]
+        for p in PIECE_ORDER:
+            acc += weights[p]
+            if r <= acc:
+                piece = p
+                break
+        train_stage(model, opt, 1, 1, rng, piece=piece)
+        if step % 200:
+            continue
+        res = eval_all(model)
+        for p in PIECE_ORDER:
+            if res[p] >= 0.99 and p in stable:
+                continue
+            if res[p] >= 0.99:
+                stable.add(p)
+                corrections[p] += 0
+            else:
+                # corrective focus: sample this failing battery more
+                weights[p] = min(weights[p] * 1.5 + 0.5, 10.0)
+                corrections[p] += 1
+                last_scores[p] = res[p]
+        rec = {"combined_step": step,
+               "scores": {chess.piece_name(p): round(pr, 4)
+                          for p, pr in res.items()},
+               "passed": sorted(chess.piece_name(p) for p in stable),
+               "corrections": dict(corrections),
+               "mins": round((time.time() - t0) / 60, 1)}
+        print(json.dumps(rec), flush=True)
+        logf.write(json.dumps(rec) + "\n"); logf.flush()
+        if len(stable) == len(PIECE_ORDER):
+            torch.save(model.state_dict(), STATE)
+            print("COMBINED CORPUS PASSED — all batteries stable >= 0.99",
+                  flush=True)
+            return True
+        tmp = STATE + ".autosave"
+        torch.save(model.state_dict(), tmp)
+        os.replace(tmp, STATE + ".autosave")
+    torch.save(model.state_dict(), STATE)
+    print("COMBINED cap reached", flush=True)
+    return False
 
 
 def milestone_stage1(model, opt):
@@ -1653,6 +1738,9 @@ def main():
     elif os.environ.get("FRESH", "0") == "1":
         print("FRESH weights (from-scratch arm)", flush=True)
     opt = torch.optim.Adam(model.parameters(), lr=3e-4)
+    if os.environ.get("COMBINED") == "1":
+        combined_stage(model, opt)
+        return
     if stage == 1:
         rngm = random.Random(1000)
         milestone_stage1(model, opt)

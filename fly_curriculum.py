@@ -388,7 +388,14 @@ def gen_stage(rng, stage, batch, piece=None):
                          if not (ray & chess.BB_SQUARES[m.to_square])]
                 if not opens:
                     continue
-                spec = {"target_mv": rng.choice(opens), "cls": 2}
+                # deterministic preferred target: captures first, then
+                # farthest-from-ray; eval accepts ANY valid discovery
+                caps = [m for m in opens if b.is_capture(m)]
+                pool = caps or opens
+                tgt = max(pool, key=lambda m: chess.square_distance(
+                    m.to_square, front_sq))
+                spec = {"target_mv": tgt, "cls": 2,
+                        "target_set": {m.uci() for m in opens}}
             out.append((b, spec))
         elif stage == 5:
             b, tgt = gen_mate1(rng)
@@ -862,8 +869,9 @@ def eval_ce(model, mode, n=96, seed=7000):
             scores.append(float(model.theta[slot].detach()) * act[slot]
                           + geo[slot] + float(mf @ wmv) + wp * ps + wt * thr)
         pick = mvs[int(np.argmax(scores))]
+        tset = spec.get("target_set") or {tgt.uci()}
         tot += 1
-        if pick == tgt:
+        if pick.uci() in tset:
             ok += 1
         else:
             failures.append((b.fen(), tgt.uci(), pick.uci()))

@@ -171,84 +171,108 @@ def gen_stage(rng, stage, batch, piece=None):
     while len(out) < batch:
         spec = {}
         if stage == 1:
-            k1, k2 = fresh_kings(rng)
+            # operator spec: ONE piece on an OPEN board, movement instinct.
+            # No kings — python-chess generates legality fine kingless.
             pt = piece or rng.choice([chess.KNIGHT, chess.BISHOP, chess.ROOK,
                                       chess.QUEEN, chess.PAWN])
-            cand = [s for s in range(64) if s not in (k1, k2)]
+            cand = [s for s in range(64)]
             if pt == chess.PAWN:
-                cand = [s for s in cand if 8 <= s < 48]
+                cand = [s for s in cand if 8 <= s < 56]   # ranks 2-7
             s = rng.choice(cand)
-            b = make_board(rng, [(k1, chess.KING, chess.WHITE),
-                                 (k2, chess.KING, chess.BLACK),
-                                 (s, pt, chess.WHITE)])
-            if b is None:
-                continue
+            b = chess.Board(None)
+            b.set_piece_at(s, chess.Piece(pt, chess.WHITE))
             spec = {"leg_sq": s, "cls": 1}
         elif stage == 2:
-            k1, k2 = fresh_kings(rng)
-            pt = rng.choice([chess.KNIGHT, chess.BISHOP, chess.ROOK,
-                             chess.QUEEN, chess.PAWN])
-            cand = [s for s in range(64) if s not in (k1, k2)]
+            # operator spec: TWO pieces, open board, no kings. Friendly
+            # blocker (cannot move through/onto) vs enemy piece (capturable).
+            pt = piece or rng.choice([chess.KING, chess.KNIGHT, chess.BISHOP,
+                                      chess.ROOK, chess.QUEEN, chess.PAWN])
+            cand = [s for s in range(64)]
             if pt == chess.PAWN:
-                cand = [s for s in cand if 8 <= s < 48]
+                cand = [s for s in cand if 8 <= s < 56]
             s = rng.choice(cand)
-            s2 = rng.choice([x for x in cand if x != s])
+            s2 = rng.choice([x for x in range(64) if x != s])
             if rng.random() < 0.5:      # friendly blocker
-                bpt = rng.choice([chess.PAWN, chess.KNIGHT, chess.BISHOP,
-                                  chess.ROOK])
-                pieces = [(k1, chess.KING, chess.WHITE), (s, pt, chess.WHITE),
-                          (s2, bpt, chess.WHITE), (k2, chess.KING, chess.BLACK)]
+                bpt = rng.choice([chess.KING, chess.PAWN, chess.KNIGHT,
+                                  chess.BISHOP, chess.ROOK, chess.QUEEN])
+                b = chess.Board(None)
+                b.set_piece_at(s, chess.Piece(pt, chess.WHITE))
+                b.set_piece_at(s2, chess.Piece(bpt, chess.WHITE))
             else:                        # enemy piece (captures appear)
-                ept = rng.choice([chess.PAWN, chess.KNIGHT, chess.BISHOP,
-                                  chess.ROOK, chess.QUEEN])
-                e_cand = [x for x in cand if x != s]
-                if pt == chess.PAWN and not e_cand:
-                    continue
-                s2 = rng.choice(e_cand)
-                pieces = [(k1, chess.KING, chess.WHITE), (s, pt, chess.WHITE),
-                          (s2, ept, chess.BLACK), (k2, chess.KING, chess.BLACK)]
-            b = make_board(rng, pieces)
-            if b is None:
-                continue
+                ept = rng.choice([chess.KING, chess.PAWN, chess.KNIGHT,
+                                  chess.BISHOP, chess.ROOK, chess.QUEEN])
+                b = chess.Board(None)
+                b.set_piece_at(s, chess.Piece(pt, chess.WHITE))
+                b.set_piece_at(s2, chess.Piece(ept, chess.BLACK))
+                if pt == chess.PAWN:
+                    # pawn captures require the enemy on a forward diagonal;
+                    # relocate s2 accordingly half the time
+                    if rng.random() < 0.6:
+                        f, r = chess.square_file(s), chess.square_rank(s)
+                        df = rng.choice([-1, 1])
+                        nf, nr = f + df, r + 1
+                        if 0 <= nf < 8 and 0 <= nr < 8:
+                            b = chess.Board(None)
+                            b.set_piece_at(s, chess.Piece(pt, chess.WHITE))
+                            b.set_piece_at(chess.square(nf, nr),
+                                           chess.Piece(ept, chess.BLACK))
             spec = {"leg_sq": s, "cls": 1}
         elif stage == 3:
-            k1, k2 = fresh_kings(rng)
-            pt = rng.choice([chess.KNIGHT, chess.BISHOP, chess.ROOK,
-                             chess.QUEEN])
-            cand = [s for s in range(64) if s not in (k1, k2)]
+            # operator spec: THREE pieces, open board, no kings. My piece +
+            # enemy piece (the capture target) + second enemy that DEFENDS it
+            # half the time -> combined protection decides whether the
+            # capture is right. Trains legality + CE on capture choice.
+            pt = piece or rng.choice([chess.KING, chess.KNIGHT, chess.BISHOP,
+                                      chess.ROOK, chess.QUEEN, chess.PAWN])
+            cand = [s for s in range(64)]
+            if pt == chess.PAWN:
+                cand = [s for s in cand if 8 <= s < 56]
             s = rng.choice(cand)
-            rest = [x for x in cand if x != s]
-            rng.shuffle(rest)
-            own2, own3 = rest[0], rest[1]
-            enemy = rest[2]
-            ept = rng.choice([chess.PAWN, chess.KNIGHT, chess.BISHOP,
-                              chess.ROOK])
-            defended = rng.random() < 0.5
-            pieces = [(k1, chess.KING, chess.WHITE), (s, pt, chess.WHITE),
-                      (own2, rng.choice([chess.PAWN, chess.KNIGHT,
-                                         chess.BISHOP, chess.ROOK]), chess.WHITE),
-                      (own3, rng.choice([chess.PAWN, chess.KNIGHT,
-                                         chess.BISHOP, chess.ROOK]), chess.WHITE),
-                      (enemy, ept, chess.BLACK), (k2, chess.KING, chess.BLACK)]
-            b = make_board(rng, pieces)
-            if b is None:
+            b = chess.Board(None)
+            b.set_piece_at(s, chess.Piece(pt, chess.WHITE))
+            # place the enemy target on a square my piece attacks
+            att = [t for t in chess.SQUARES
+                   if b.attacks_mask(s) & chess.BB_SQUARES[t]]
+            if pt == chess.PAWN:
+                f, r = chess.square_file(s), chess.square_rank(s)
+                att = [chess.square(f + d, r + 1) for d in (-1, 1)
+                       if 0 <= f + d < 8 and r + 1 < 8]
+            if not att:
                 continue
+            e1 = rng.choice(att)
+            ept = rng.choice([chess.KING, chess.PAWN, chess.KNIGHT,
+                              chess.BISHOP, chess.ROOK, chess.QUEEN])
+            b.set_piece_at(e1, chess.Piece(ept, chess.BLACK))
+            defended = rng.random() < 0.5
             if defended:
-                # place a defender adjacent-ish to the enemy piece (same color)
-                near = [q for q in chess.SQUARES
-                        if q not in (k1, k2, s, own2, own3, enemy)
-                        and chess.square_distance(q, enemy) <= 2]
-                if not near:
+                dpt = rng.choice([chess.KING, chess.PAWN, chess.KNIGHT,
+                                  chess.BISHOP, chess.ROOK, chess.QUEEN])
+                defs = []
+                for t in chess.SQUARES:
+                    if t in (s, e1) or chess.square_distance(t, e1) != 1:
+                        continue
+                    sc = chess.Board(None)
+                    sc.set_piece_at(t, chess.Piece(dpt, chess.BLACK))
+                    if sc.attacks_mask(t) & chess.BB_SQUARES[e1]:
+                        defs.append(t)
+                if not defs:
                     continue
-                b.set_piece_at(rng.choice(near),
-                               chess.Piece(rng.choice([chess.PAWN, chess.KNIGHT]),
-                                           chess.BLACK))
-            # CE target: capture the enemy piece IF it is legal, else any move
-            cap = chess.Move(s, enemy) if chess.Move(s, enemy) in b.legal_moves \
-                else None
-            if cap is None:
-                cap = rng.choice(list(b.legal_moves))
-            spec = {"leg_sq": s, "target_mv": cap, "cls": 1}
+                b.set_piece_at(rng.choice(defs),
+                               chess.Piece(dpt, chess.BLACK))
+            cap = chess.Move(s, e1)
+            spec = {"leg_sq": s, "cls": 1}
+            if cap in b.legal_moves:
+                if defended:
+                    # protection lesson: grabbing a defended piece is wrong;
+                    # CE target = a safe non-capturing move instead
+                    safe = [m for m in b.legal_moves
+                            if m.from_square == s and not b.is_capture(m)]
+                    if safe:
+                        spec["target_mv"] = rng.choice(safe)
+                else:
+                    spec["target_mv"] = cap
+            out.append((b, spec))
+            continue
         elif stage == 4:
             mode = rng.choice(["their_king", "my_king", "pin", "fork",
                                "discovered"])
@@ -477,8 +501,10 @@ def train_stage(model, opt, stage, steps, rng, piece=None):
             yy = torch.zeros(len(leg_idx), 4096, device=DEV)
             ww = torch.ones(len(leg_idx), 4096, device=DEV)
             for r, (y, K) in enumerate(leg_slots):
+                if K == 0:
+                    continue
                 idx = torch.tensor([int(s) for s in slotb[leg_idx[r], :K]],
-                                   device=DEV)
+                                   dtype=torch.long, device=DEV)
                 yy[r, idx] = torch.from_numpy(y[:K]).to(DEV)
                 for j, s in enumerate(slotb[leg_idx[r], :K]):
                     wboost = HARD_SLOT_W.get(int(s))
@@ -541,16 +567,16 @@ def gate_stage(model, stage, rng):
 STAGE_GATE = {1: (0.99, None), 2: (0.99, None), 3: (0.99, 1.00),
               4: (0.99, 1.00), 5: (None, 1.00), 6: (None, 0.98)}
 
-PIECE_ORDER = [chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.QUEEN,
-               chess.PAWN]
+PIECE_ORDER = [chess.KING, chess.ROOK, chess.BISHOP, chess.KNIGHT,
+               chess.QUEEN, chess.PAWN]
 
 
-def eval_piece(model, piece, n=64, seed=5000):
+def eval_piece(model, piece, n=64, seed=5000, stage=1):
     """Held-out battery for ONE piece type. Returns (pair, top1, failures):
     failures = list of (fen, piece_sq, legal_to, illegal_to, gap) where the
     illegal slot outscores the legal one."""
-    rng = random.Random(seed + piece)
-    boards_specs = gen_stage(rng, 1, n, piece=piece)
+    rng = random.Random(seed + piece + stage * 7919)
+    boards_specs = gen_stage(rng, stage, n, piece=piece)
     fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
     with torch.no_grad():
         a = model.propagate(fvb)
@@ -562,8 +588,7 @@ def eval_piece(model, piece, n=64, seed=5000):
         legal = {m.to_square for m in b.legal_moves if m.from_square == sq}
         if not legal:
             continue
-        illegal = [t for t in range(64) if t != sq and t not in legal
-                   and t not in (b.king(chess.WHITE), b.king(chess.BLACK))]
+        illegal = [t for t in range(64) if t != sq and t not in legal]
         if not illegal:
             continue
         row = T_all[i]
@@ -579,6 +604,170 @@ def eval_piece(model, piece, n=64, seed=5000):
                               if t != sq) < max(row[sq * 64 + lt]
                                                 for lt in legal) for lt in [max(legal, key=lambda t: row[sq * 64 + t])]))
     return ok / max(tot, 1), failures
+
+
+def milestone_stage2(model, opt):
+    """Stage 2 milestones: per piece, two-piece boards (blocker/capture).
+    Eval = pairwise legality incl. capture-vs-block discrimination."""
+    logf = open(LOGF, "a")
+    for piece in PIECE_ORDER:
+        name = chess.piece_name(piece)
+        print(f"=== S2 MILESTONE piece={name} ===", flush=True)
+        best = -1.0
+        stall = 0
+        rng = random.Random(3000 + piece)
+        for step in range(1, 6001):
+            train_stage(model, opt, 2, 1, rng, piece=piece)
+            pair, failures = eval_piece(model, piece, n=96, stage=2)
+            if step % 20 == 0 or pair >= 0.99 or (stall >= 1):
+                rec = {"s2_milestone": name, "step": step,
+                       "pair": round(pair, 4)}
+                print(json.dumps(rec), flush=True)
+                logf.write(json.dumps(rec) + "\n"); logf.flush()
+            if pair >= 0.99:
+                print(f"S2 MILESTONE {name} PASS at step {step}", flush=True)
+                torch.save(model.state_dict(), STATE)
+                sweep = []
+                blocked = None
+                for p2 in PIECE_ORDER[:PIECE_ORDER.index(piece) + 1]:
+                    n2 = chess.piece_name(p2)
+                    pr, fails = eval_piece(model, p2, n=96, stage=2)
+                    for rnd in range(3):
+                        if pr >= 0.98:
+                            break
+                        for fen, sq, lt, it, gap in fails[:60]:
+                            HARD_SLOT_W[sq * 64 + lt] = 6.0
+                            HARD_SLOT_W[sq * 64 + it] = 4.0
+                        train_stage(model, opt, 2, 100,
+                                    random.Random(4000 + p2 + rnd), piece=p2)
+                        pr, fails = eval_piece(model, p2, n=96, stage=2)
+                    if pr < 0.98:
+                        blocked = (n2, pr, fails)
+                    sweep.append(f"{n2}={round(pr, 3)}")
+                print("S2 REGRESSION-SWEEP " + " ".join(sweep), flush=True)
+                if blocked:
+                    n2, pr, fails = blocked
+                    print(f"S2 SWEEP-BLOCKED {n2} at {pr:.3f} — failures:",
+                          flush=True)
+                    for fen, sq, lt, it, gap in fails[:10]:
+                        print(f"  FAIL {fen} sq={chess.square_name(sq)} "
+                              f"legal={chess.square_name(lt)} "
+                              f"illegal={chess.square_name(it)} gap={gap}",
+                              flush=True)
+                    torch.save(model.state_dict(), STATE)
+                    return False
+                break
+            if step < 100:
+                best = max(best, pair)
+                continue
+            if pair <= best + 0.001:
+                stall += 1
+            else:
+                stall = 0
+                best = pair
+            if stall >= 8:
+                print(f"S2 MILESTONE {name} STOP at step {step} "
+                      f"(best {best:.3f}, now {pair:.3f}) — failures:",
+                      flush=True)
+                for fen, sq, lt, it, gap in failures[:10]:
+                    print(f"  FAIL {fen} sq={chess.square_name(sq)} "
+                          f"legal={chess.square_name(lt)} "
+                          f"illegal={chess.square_name(it)} gap={gap}",
+                          flush=True)
+                for fen, sq, lt, it, gap in failures[:80]:
+                    HARD_SLOT_W[sq * 64 + lt] = 6.0
+                    HARD_SLOT_W[sq * 64 + it] = 4.0
+                stall = 0
+                best = max(best, pair)
+                continue
+    torch.save(model.state_dict(), STATE)
+    print("STAGE 2 ALL MILESTONES PASSED", flush=True)
+    return True
+
+
+def milestone_stage3(model, opt):
+    """Stage 3 milestones: protection. Sweep covers ALL prior stages."""
+    logf = open(LOGF, "a")
+
+    def sweep_all():
+        parts = []
+        blocked = None
+        for st in (1, 2, 3):
+            for p2 in PIECE_ORDER:
+                n2 = chess.piece_name(p2)
+                pr, fails = eval_piece(model, p2, n=96, stage=st)
+                for rnd in range(3):
+                    if pr >= 0.98:
+                        break
+                    for fen, sq, lt, it, gap in fails[:60]:
+                        HARD_SLOT_W[sq * 64 + lt] = 6.0
+                        HARD_SLOT_W[sq * 64 + it] = 4.0
+                    train_stage(model, opt, st, 100,
+                                random.Random(5000 + st * 31 + p2 + rnd),
+                                piece=p2)
+                    pr, fails = eval_piece(model, p2, n=96, stage=st)
+                if pr < 0.98:
+                    blocked = (st, n2, pr, fails)
+                parts.append(f"s{st}:{n2}={round(pr, 3)}")
+        print("S3 REGRESSION-SWEEP " + " ".join(parts), flush=True)
+        return blocked
+
+    for piece in PIECE_ORDER:
+        name = chess.piece_name(piece)
+        print(f"=== S3 MILESTONE piece={name} ===", flush=True)
+        best = -1.0
+        stall = 0
+        rng = random.Random(6000 + piece)
+        for step in range(1, 6001):
+            train_stage(model, opt, 3, 1, rng, piece=piece)
+            pair, failures = eval_piece(model, piece, n=96, stage=3)
+            if step % 20 == 0 or pair >= 0.99 or (stall >= 1):
+                rec = {"s3_milestone": name, "step": step,
+                       "pair": round(pair, 4)}
+                print(json.dumps(rec), flush=True)
+                logf.write(json.dumps(rec) + "\n"); logf.flush()
+            if pair >= 0.99:
+                print(f"S3 MILESTONE {name} PASS at step {step}", flush=True)
+                torch.save(model.state_dict(), STATE)
+                blocked = sweep_all()
+                if blocked:
+                    st, n2, pr, fails = blocked
+                    print(f"S3 SWEEP-BLOCKED stage{st} {n2} at {pr:.3f} — "
+                          f"failures:", flush=True)
+                    for fen, sq, lt, it, gap in fails[:10]:
+                        print(f"  FAIL {fen} sq={chess.square_name(sq)} "
+                              f"legal={chess.square_name(lt)} "
+                              f"illegal={chess.square_name(it)} gap={gap}",
+                              flush=True)
+                    torch.save(model.state_dict(), STATE)
+                    return False
+                break
+            if step < 100:
+                best = max(best, pair)
+                continue
+            if pair <= best + 0.001:
+                stall += 1
+            else:
+                stall = 0
+                best = pair
+            if stall >= 8:
+                print(f"S3 MILESTONE {name} STOP at step {step} "
+                      f"(best {best:.3f}, now {pair:.3f}) — failures:",
+                      flush=True)
+                for fen, sq, lt, it, gap in failures[:10]:
+                    print(f"  FAIL {fen} sq={chess.square_name(sq)} "
+                          f"legal={chess.square_name(lt)} "
+                          f"illegal={chess.square_name(it)} gap={gap}",
+                          flush=True)
+                for fen, sq, lt, it, gap in failures[:80]:
+                    HARD_SLOT_W[sq * 64 + lt] = 6.0
+                    HARD_SLOT_W[sq * 64 + it] = 4.0
+                stall = 0
+                best = max(best, pair)
+                continue
+    torch.save(model.state_dict(), STATE)
+    print("STAGE 3 ALL MILESTONES PASSED", flush=True)
+    return True
 
 
 def milestone_stage1(model, opt):
@@ -975,6 +1164,12 @@ def main():
     if stage == 1:
         rngm = random.Random(1000)
         milestone_stage1(model, opt)
+        return
+    if stage == 2:
+        milestone_stage2(model, opt)
+        return
+    if stage == 3:
+        milestone_stage3(model, opt)
         return
     rng = random.Random(1000 + stage)
     train_stage(model, opt, stage, steps, rng)

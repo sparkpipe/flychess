@@ -487,7 +487,7 @@ def build_batch(rng, stage, batch, piece=None):
                                    & chess.BB_SQUARES[mv.to_square]) else 0.0
             b.push(mv)
             threat[i, j] = min(bin(b.attacks_mask(mv.to_square)
-                                   & b.occupied_co[not b.turn]).count("1"), 4) / 4.0
+                                   & b.occupied_co[b.turn]).count("1"), 4) / 4.0
             b.pop()
     return fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots, pseudo, threat
 
@@ -857,7 +857,7 @@ def eval_ce(model, mode, n=96, seed=7000):
                          & chess.BB_SQUARES[mv.to_square]) else 0.0
             b.push(mv)
             thr = min(bin(b.attacks_mask(mv.to_square)
-                          & b.occupied_co[not b.turn]).count("1"), 4) / 4.0
+                          & b.occupied_co[b.turn]).count("1"), 4) / 4.0
             b.pop()
             scores.append(float(model.theta[slot].detach()) * act[slot]
                           + geo[slot] + float(mf @ wmv) + wp * ps + wt * thr)
@@ -988,7 +988,7 @@ def eval_piece_boards(model, boards_specs):
             if mvq in b.legal_moves:
                 b.push(mvq)
                 thr = min(bin(b.attacks_mask(t)
-                              & b.occupied_co[not b.turn]).count("1"), 4) / 4.0
+                              & b.occupied_co[b.turn]).count("1"), 4) / 4.0
                 b.pop()
             return (float(model.theta[slot].detach()) * act[slot]
                     + geo[slot] + float(mf @ wmv) + wp * ps + wt * thr)

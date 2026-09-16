@@ -84,6 +84,9 @@ class FlyCB(torch.nn.Module):
         # from->to binding: target square in the moving piece's attack set
         # (the additional view that carries piece-to-target relations)
         self.w_pseudo = torch.nn.Parameter(torch.tensor(0.0))
+        # post-move threat count: enemies attacked FROM the destination
+        # (fork detection: count >= 2). Checkpoint-compatible scalar.
+        self.w_threat = torch.nn.Parameter(torch.tensor(0.0))
         self.register_buffer("slot_geo",
                              torch.from_numpy(flyfeat_cb.slot_geo()))
         self.theta_mv = torch.nn.Parameter(torch.zeros(flyfeat_cb.MOVE_DIMS))
@@ -474,6 +477,7 @@ def build_batch(rng, stage, batch, piece=None):
             tgtb[i] = mvs.index(spec["target_mv"])
         clb[i] = spec.get("cls", 1)
     pseudo = np.zeros((len(boards_specs), MAXL), np.float32)
+    threat = np.zeros((len(boards_specs), MAXL), np.float32)
     for i, (b, spec) in enumerate(boards_specs):
         mvs = list(b.legal_moves)
         K = min(len(mvs), MAXL)
@@ -481,10 +485,14 @@ def build_batch(rng, stage, batch, piece=None):
             pc = b.piece_at(mv.from_square)
             pseudo[i, j] = 1.0 if (pc and b.attacks_mask(mv.from_square)
                                    & chess.BB_SQUARES[mv.to_square]) else 0.0
-    return fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots, pseudo
+            b.push(mv)
+            threat[i, j] = min(bin(b.attacks_mask(mv.to_square)
+                                   & b.occupied_co[not b.turn]).count("1"), 4) / 4.0
+            b.pop()
+    return fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots, pseudo, threat
 
 
-def forward(model, fvb, slotb, mfb, maskb, pseudob=None):
+def forward(model, fvb, slotb, mfb, maskb, pseudob=None, threatb=None):
     a = model.propagate(fvb)
     Bn = a.shape[1]
     cols = torch.arange(Bn, device=DEV).unsqueeze(1)
@@ -494,6 +502,8 @@ def forward(model, fvb, slotb, mfb, maskb, pseudob=None):
         + geo[slots] + torch.from_numpy(mfb).to(DEV) @ model.theta_mv
     if pseudob is not None:
         T = T + model.w_pseudo * torch.from_numpy(pseudob).to(DEV)
+    if threatb is not None:
+        T = T + model.w_threat * torch.from_numpy(threatb).to(DEV)
     T = T.masked_fill(~torch.from_numpy(maskb).to(DEV), -1e9)
     T_all = model.logits_all(a)                                # (B, 4096)
     cls = model.theta_cls.unsqueeze(0) * torch.tanh(a[model.cls_idx].T / 4.0)
@@ -507,9 +517,9 @@ def train_stage(model, opt, stage, steps, rng, piece=None):
     t0 = time.time()
     for step in range(1, steps + 1):
         bb = build_batch(rng, stage, B, piece=piece)
-        fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots, pseudob = bb
+        fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots, pseudob, threatb = bb
         T, logp, T_all, cls = forward(model, fvb, slotb, mfb,
-                                      maskb, pseudob)
+                                      maskb, pseudob, threatb)
         loss = 0.0
         if leg_idx:
             # per-move legality BCE on the bound logits (with pseudo flag):
@@ -562,7 +572,7 @@ def gate_stage(model, stage, rng):
     fvb, slotb, mfb, maskb, tgtb, clb, leg_idx, leg_slots = bb
     with torch.no_grad():
         T, logp, T_all, cls = forward(model, fvb, slotb, mfb,
-                                      maskb, pseudob)
+                                      maskb, pseudob, threatb)
     ok_pair = tot_pair = 0
     for r, (y, K) in enumerate(leg_slots):
         pos = [j for j in range(K) if y[j] > 0]
@@ -838,14 +848,19 @@ def eval_ce(model, mode, n=96, seed=7000):
         scores = []
         wmv = model.theta_mv.detach().cpu().numpy()
         wp = float(model.w_pseudo.detach())
+        wt = float(model.w_threat.detach())
         for mv in mvs:
             slot = mv.from_square * 64 + mv.to_square
             mf = flyfeat_cb.move_feats(b, mv)
             pc = b.piece_at(mv.from_square)
             ps = 1.0 if (pc and b.attacks_mask(mv.from_square)
                          & chess.BB_SQUARES[mv.to_square]) else 0.0
+            b.push(mv)
+            thr = min(bin(b.attacks_mask(mv.to_square)
+                          & b.occupied_co[not b.turn]).count("1"), 4) / 4.0
+            b.pop()
             scores.append(float(model.theta[slot].detach()) * act[slot]
-                          + geo[slot] + float(mf @ wmv) + wp * ps)
+                          + geo[slot] + float(mf @ wmv) + wp * ps + wt * thr)
         pick = mvs[int(np.argmax(scores))]
         tot += 1
         if pick == tgt:
@@ -950,6 +965,7 @@ def eval_piece_boards(model, boards_specs):
     failures = []
     wmv = model.theta_mv.detach().cpu().numpy()
     wp = float(model.w_pseudo.detach())
+    wt = float(model.w_threat.detach())
     for i, (b, spec) in enumerate(boards_specs):
         sq = spec.get("leg_sq")
         if sq is None:
@@ -968,8 +984,14 @@ def eval_piece_boards(model, boards_specs):
                     flyfeat_cb.MOVE_DIMS, np.float32)
             ps = 1.0 if (pc and b.attacks_mask(sq)
                          & chess.BB_SQUARES[t]) else 0.0
+            thr = 0.0
+            if mvq in b.legal_moves:
+                b.push(mvq)
+                thr = min(bin(b.attacks_mask(t)
+                              & b.occupied_co[not b.turn]).count("1"), 4) / 4.0
+                b.pop()
             return (float(model.theta[slot].detach()) * act[slot]
-                    + geo[slot] + float(mf @ wmv) + wp * ps)
+                    + geo[slot] + float(mf @ wmv) + wp * ps + wt * thr)
         for lt in list(legal)[:3]:
             for it in illegal[:3]:
                 tot += 1

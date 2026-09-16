@@ -170,7 +170,7 @@ def feat_vec(board):
     return np.array([d.get(k, 0.0) for k in FEATURE_KEYS], dtype=np.float32), cb
 
 
-MOVE_DIMS = 18
+MOVE_DIMS = 17
 
 
 def move_feats(board, mv):
@@ -202,7 +202,6 @@ def move_feats(board, mv):
     g[15] = 1.0 if {abs(df), abs(dr)} == {1, 2} else 0.0     # knight shape
     g[16] = min(chess.square_file(to), 7 - chess.square_file(to),
                 chess.square_rank(to), 7 - chess.square_rank(to)) / 3.0
-    g[17] = 1.0 if max(abs(df), abs(dr)) == 1 else 0.0      # king shape
     return g
 
 
@@ -210,7 +209,7 @@ SLOT_GEO = None
 
 
 def slot_geo():
-    """(4096, 11) constant geometric basis per (from,to) slot: the shared
+    """(4096, 10) constant geometric basis per (from,to) slot: the shared
     displacement signal for the legality head."""
     global SLOT_GEO
     if SLOT_GEO is None:
@@ -218,7 +217,7 @@ def slot_geo():
         for fr in range(64):
             for to in range(64):
                 if fr == to:
-                    rows.append(np.zeros(11, dtype=np.float32))
+                    rows.append(np.zeros(10, dtype=np.float32))
                     continue
                 df = (to % 8) - (fr % 8)
                 dr = (to // 8) - (fr // 8)
@@ -228,8 +227,7 @@ def slot_geo():
                     1.0 if abs(df) == abs(dr) and df != 0 else 0.0,
                     1.0 if {abs(df), abs(dr)} == {1, 2} else 0.0,
                     min(to % 8, 7 - to % 8, to // 8, 7 - to // 8) / 3.0,
-                    min(fr % 8, 7 - fr % 8, fr // 8, 7 - fr // 8) / 3.0,
-                    1.0 if max(abs(df), abs(dr)) == 1 else 0.0],
+                    min(fr % 8, 7 - fr % 8, fr // 8, 7 - fr // 8) / 3.0],
                     dtype=np.float32))
         SLOT_GEO = np.stack(rows)
     return SLOT_GEO

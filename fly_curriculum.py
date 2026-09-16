@@ -80,7 +80,7 @@ class FlyCB(torch.nn.Module):
         self.inj_idx = self.sensory_idx          # default: periphery
         self.theta = torch.nn.Parameter(torch.zeros(4096))
         # shared displacement basis: movement rules generalize across slots
-        self.geo_w = torch.nn.Linear(11, 1)
+        self.geo_w = torch.nn.Linear(10, 1)
         self.register_buffer("slot_geo",
                              torch.from_numpy(flyfeat_cb.slot_geo()))
         self.theta_mv = torch.nn.Parameter(torch.zeros(flyfeat_cb.MOVE_DIMS))
@@ -171,16 +171,18 @@ def gen_stage(rng, stage, batch, piece=None):
     while len(out) < batch:
         spec = {}
         if stage == 1:
-            # operator spec: ONE piece on an OPEN board, movement instinct.
-            # No kings — python-chess generates legality fine kingless.
+            k1, k2 = fresh_kings(rng)
             pt = piece or rng.choice([chess.KNIGHT, chess.BISHOP, chess.ROOK,
                                       chess.QUEEN, chess.PAWN])
-            cand = [s for s in range(64)]
+            cand = [s for s in range(64) if s not in (k1, k2)]
             if pt == chess.PAWN:
-                cand = [s for s in cand if 8 <= s < 56]   # ranks 2-7
+                cand = [s for s in cand if 8 <= s < 48]
             s = rng.choice(cand)
-            b = chess.Board(None)
-            b.set_piece_at(s, chess.Piece(pt, chess.WHITE))
+            b = make_board(rng, [(k1, chess.KING, chess.WHITE),
+                                 (k2, chess.KING, chess.BLACK),
+                                 (s, pt, chess.WHITE)])
+            if b is None:
+                continue
             spec = {"leg_sq": s, "cls": 1}
         elif stage == 2:
             k1, k2 = fresh_kings(rng)
@@ -539,8 +541,8 @@ def gate_stage(model, stage, rng):
 STAGE_GATE = {1: (0.99, None), 2: (0.99, None), 3: (0.99, 1.00),
               4: (0.99, 1.00), 5: (None, 1.00), 6: (None, 0.98)}
 
-PIECE_ORDER = [chess.KING, chess.ROOK, chess.BISHOP, chess.KNIGHT,
-               chess.QUEEN, chess.PAWN]
+PIECE_ORDER = [chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.QUEEN,
+               chess.PAWN]
 
 
 def eval_piece(model, piece, n=64, seed=5000):
@@ -560,7 +562,8 @@ def eval_piece(model, piece, n=64, seed=5000):
         legal = {m.to_square for m in b.legal_moves if m.from_square == sq}
         if not legal:
             continue
-        illegal = [t for t in range(64) if t != sq and t not in legal]
+        illegal = [t for t in range(64) if t != sq and t not in legal
+                   and t not in (b.king(chess.WHITE), b.king(chess.BLACK))]
         if not illegal:
             continue
         row = T_all[i]

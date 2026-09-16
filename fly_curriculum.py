@@ -751,6 +751,16 @@ def milestone_stage3(model, opt):
             else:
                 stall = 0
                 best = pair
+            if step == 6000:
+                print(f"S3 MILESTONE {name} EXHAUSTED at cap "
+                      f"(best {best:.3f}) — failures:", flush=True)
+                for fen, sq, lt, it, gap in failures[:10]:
+                    print(f"  FAIL {fen} sq={chess.square_name(sq)} "
+                          f"legal={chess.square_name(lt)} "
+                          f"illegal={chess.square_name(it)} gap={gap}",
+                          flush=True)
+                torch.save(model.state_dict(), STATE)
+                return False               # never silently skip a piece
             if stall >= 8:
                 print(f"S3 MILESTONE {name} STOP at step {step} "
                       f"(best {best:.3f}, now {pair:.3f}) — failures:",

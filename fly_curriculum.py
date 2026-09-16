@@ -689,11 +689,12 @@ def milestone_stage3(model, opt):
     """Stage 3 milestones: protection. Sweep covers ALL prior stages."""
     logf = open(LOGF, "a")
 
-    def sweep_all():
+    def sweep_all(upto):
         parts = []
         blocked = None
         for st in (1, 2, 3):
-            for p2 in PIECE_ORDER:
+            for p2 in (PIECE_ORDER if st < 3
+                       else PIECE_ORDER[:PIECE_ORDER.index(upto) + 1]):
                 n2 = chess.piece_name(p2)
                 pr, fails = eval_piece(model, p2, n=96, stage=st)
                 for rnd in range(3):
@@ -729,7 +730,7 @@ def milestone_stage3(model, opt):
             if pair >= 0.99:
                 print(f"S3 MILESTONE {name} PASS at step {step}", flush=True)
                 torch.save(model.state_dict(), STATE)
-                blocked = sweep_all()
+                blocked = sweep_all(piece)
                 if blocked:
                     st, n2, pr, fails = blocked
                     print(f"S3 SWEEP-BLOCKED stage{st} {n2} at {pr:.3f} — "

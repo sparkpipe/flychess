@@ -395,7 +395,8 @@ def gen_stage(rng, stage, batch, piece=None):
                 tgt = max(pool, key=lambda m: chess.square_distance(
                     m.to_square, front_sq))
                 spec = {"target_mv": tgt, "cls": 2,
-                        "target_set": {m.uci() for m in opens}}
+                        "target_set": {m.uci() for m in opens},
+                        "eval_from": front_sq}
             out.append((b, spec))
         elif stage == 5:
             b, tgt = gen_mate1(rng)
@@ -848,6 +849,9 @@ def eval_ce(model, mode, n=96, seed=7000):
         if tgt is None:
             continue
         mvs = list(b.legal_moves)
+        ef = spec.get("eval_from")
+        if ef is not None:
+            mvs = [m for m in mvs if m.from_square == ef]
         if not mvs or tgt not in mvs:
             continue
         act = a[model.readout_idx.cpu().numpy(), i].detach().cpu().numpy()

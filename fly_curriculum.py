@@ -21,18 +21,19 @@ import sys, os, json, time, random, chess
 import numpy as np
 import torch
 
-sys.path.insert(0, "/home/spec/chess-lab")
-import fly_v3_full as v3
+import os as _o
+_LAB = _o.path.expanduser("~") + "/chess-lab"
+sys.path.insert(0, _LAB)
 import scipy.sparse as sp
 import flyfeat_cb
 
 DEV = "cuda"
-STATE = os.environ.get("STATE", "/home/spec/chess-lab/fly_cb.pt")
-LOGF = "/home/spec/chess-lab/fly_cb_log.jsonl"
-BRAIN = "/home/spec/chess-lab/brain_graph.npz"
-SENS = "/home/spec/chess-lab/sensory_idx.npy"
-ANN = "/home/spec/chess-lab/annotations.feather"
-NODES = "/home/spec/chess-lab/node_ids.npy"
+STATE = os.environ.get("STATE", _LAB + "/fly_cb.pt")
+LOGF = _LAB + "/fly_cb_log.jsonl"
+BRAIN = _LAB + "/brain_graph.npz"
+SENS = _LAB + "/sensory_idx.npy"
+ANN = _LAB + "/annotations.feather"
+NODES = _LAB + "/node_ids.npy"
 PROP_STEPS = int(os.environ.get("STEPS", "6"))   # real circuits are 4-7 synapses
 LEAK = float(os.environ.get("LEAK", "0.5"))
 CAP = 20.0
@@ -58,9 +59,13 @@ WIRING_MAP = {
 
 
 def build_retino_map(mode="geo", seed=12345):
-    """Board squares -> optic-lobe columns via the real hex retinotopy.
-    8x8 bins from the (hex1, hex2) lattice; mode=shuf permutes square->bin
-    (fungibility control: same site, same neurons, wrong geometry)."""
+    """Three-patch retinotopic overlay on the REAL hex lattice:
+      square patch: (file, rank) -> columns, lamina neurons — atk/occ
+      diagonal patch: rotated frame (dark=f-r, light=f+r) -> second column
+        band, medulla Tm/Mi — atk again, so bishop lines are axis-aligned
+      net patch: same geometry as square, deeper-layer neurons — net force
+    mode=shuf permutes square->column identically in all patches
+    (fungibility control: same neurons, wrong geometry)."""
     import pandas as pd
     a = pd.read_feather(ANN)
     node_ids = np.load(NODES)
@@ -68,27 +73,78 @@ def build_retino_map(mode="geo", seed=12345):
     m = a.assignedOlHex1.notna() & a.assignedOlHex2.notna() \
         & a.bodyId.isin(pos)
     sub = a[m]
-    h1 = sub.assignedOlHex1.values
-    h2 = sub.assignedOlHex2.values
-    bins = {}
-    lo1, hi1 = np.percentile(h1, [20, 80])
-    lo2, hi2 = np.percentile(h2, [20, 80])
-    b1 = np.clip(((h1 - lo1) / max(hi1 - lo1, 1) * 7.999).astype(int), 0, 7)
-    b2 = np.clip(((h2 - lo2) / max(hi2 - lo2, 1) * 7.999).astype(int), 0, 7)
+    h1 = sub.assignedOlHex1.values.astype(int)
+    h2 = sub.assignedOlHex2.values.astype(int)
+    ty = sub.flywireType.fillna("").astype(str).values
+    c1 = np.sort(np.unique(h1))
+    # three disjoint 16-column bands; each board square = a 2x2 column block
+    band = [c1[2:18], c1[20:36] if len(c1) >= 36 else c1[20:], c1[2:18]]
+    c2 = np.sort(np.unique(h2))
+    use2 = c2[4:20]
+
+    def patch(bandcols, typefilter):
+        bins = {}
+        bc = np.asarray(bandcols)
+        for i in range(len(sub)):
+            if h1[i] not in bc or h2[i] not in use2:
+                continue
+            if not typefilter(ty[i]):
+                continue
+            b1 = int(np.searchsorted(bc, h1[i])) // 2
+            b2 = int(np.searchsorted(use2, h2[i])) // 2
+            if b1 > 7 or b2 > 7:
+                continue
+            nid = pos[int(sub.bodyId.values[i])]
+            bins.setdefault(b1 * 8 + b2, []).append(nid)
+        return bins
+
+    lam = patch(band[0], lambda t: t.startswith("L"))
+    med = patch(band[1], lambda t: t.startswith(("Tm", "Mi", "T1", "T2")))
+    # net patch: same hex1 band as square, shifted hex2 (disjoint region,
+    # any cell type — independence by geography, not type)
+    netp = None
     for i in range(len(sub)):
-        col = int(b1[i]) * 8 + int(b2[i])
-        nid = pos[int(sub.bodyId.values[i])]
-        bins.setdefault(col, []).append(nid)
+        pass
+    def patch2():
+        bins = {}
+        bc = np.asarray(band[2])
+        u2 = c2[24:40]
+        for i in range(len(sub)):
+            if h1[i] not in bc or h2[i] not in u2:
+                continue
+            b1 = int(np.searchsorted(bc, h1[i])) // 2
+            b2 = int(np.searchsorted(u2, h2[i])) // 2
+            if b1 > 7 or b2 > 7:
+                continue
+            nid = pos[int(sub.bodyId.values[i])]
+            bins.setdefault(b1 * 8 + b2, []).append(nid)
+        return bins
+    netp = patch2()
     rng = np.random.default_rng(seed)
-    sq_bins = list(range(64))
+    sq_perm = list(range(64))
     if mode == "shuf":
-        rng.shuffle(sq_bins)                     # square s -> bin sq_bins[s]
-    out = {}
-    for s in range(64):
-        idx = bins.get(sq_bins[s], [])
-        if len(idx) > 400:
-            idx = list(rng.choice(idx, 400, replace=False))
-        out[s] = np.array(idx, dtype=np.int64)
+        rng.shuffle(sq_perm)
+
+    def cap(idx):
+        if len(idx) > 300:
+            return list(rng.choice(idx, 300, replace=False))
+        return idx
+
+    out = {"square": {}, "diag": {}, "net": {}}
+    for f in range(8):
+        for r in range(8):
+            s = f * 8 + r
+            sp = sq_perm[s]
+            out["square"][sp] = np.array(cap(lam.get(sp, [])), dtype=np.int64)
+            dark = (f - r + 7) // 2          # rotated frame, binned to 8
+            light = (f + r) // 2
+            db = dark * 8 + light
+            out["diag"][sp] = np.array(cap(med.get(db, [])), dtype=np.int64)
+            out["net"][sp] = np.array(cap(netp.get(sp, [])), dtype=np.int64)
+    tot = sum(len(v) for p in out.values() for v in p.values())
+    print(f"retino {mode}: square={sum(len(v) for v in out['square'].values())} "
+          f"diag={sum(len(v) for v in out['diag'].values())} "
+          f"net={sum(len(v) for v in out['net'].values())}", flush=True)
     return out
 
 
@@ -195,16 +251,24 @@ class FlyCB(torch.nn.Module):
             sq_idx = self._sq_idx
             B = x.shape[0]
             a = torch.zeros(self.N, B, device=DEV)
-            for s_ in range(64):
-                idx = self.retino.get(s_)
+            R = self.retino
+            def inject(patchkey, s_, c_, g):
+                idx = R[patchkey].get(s_)
                 if idx is None or not len(idx):
-                    continue
+                    return
+                fi = sq_idx[c_].get(s_)
+                if fi is None:
+                    return
                 ti = torch.from_numpy(idx).to(DEV)
-                for c_ in range(5):
-                    fi = sq_idx[c_].get(s_)
-                    if fi is None:
-                        continue
-                    a[ti] = a[ti] + self.retino_gain[c_] * x[:, fi][None, :]
+                a[ti] = a[ti] + self.retino_gain[g] * x[:, fi][None, :]
+            for s_ in range(64):
+                inject("square", s_, 0, 0)        # atk_my   (lamina)
+                inject("square", s_, 1, 1)        # atk_their
+                inject("square", s_, 2, 2)        # occ_my
+                inject("square", s_, 3, 3)        # occ_their
+                inject("diag", s_, 0, 4)          # atk_my   (rotated frame)
+                inject("diag", s_, 1, 5)          # atk_their (bishop lines)
+                inject("net", s_, 4, 6)           # net force (deeper layer)
             for _ in range(PROP_STEPS):
                 a = torch.clamp((1 - LEAK) * a + LEAK * (self.WT @ a),
                                 -CAP, CAP)
@@ -682,8 +746,10 @@ def gate_stage(model, stage, rng):
 STAGE_GATE = {1: (0.99, None), 2: (0.99, None), 3: (0.99, 1.00),
               4: (0.99, 1.00), 5: (None, 1.00), 6: (None, 0.98)}
 
-PIECE_ORDER = [chess.KING, chess.ROOK, chess.BISHOP, chess.KNIGHT,
-               chess.QUEEN, chess.PAWN]
+_PC = {"king": chess.KING, "rook": chess.ROOK, "bishop": chess.BISHOP,
+       "knight": chess.KNIGHT, "queen": chess.QUEEN, "pawn": chess.PAWN}
+PIECE_ORDER = [_PC[p] for p in os.environ.get("PIECES",
+               "king,rook,bishop,knight,queen,pawn").split(",")]
 
 
 def eval_piece(model, piece, n=64, seed=5000, stage=1):
@@ -1178,7 +1244,6 @@ def main_tb(steps):
     """Stage 6: exact tablebase endings, graded move-value training."""
     rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP"])
     torch.manual_seed(0)                     # deterministic init + selection
-    v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
     retino_mode = os.environ.get("RETINO", "")
     if retino_mode in ("geo", "shuf"):
@@ -1190,7 +1255,7 @@ def main_tb(steps):
     wiring = None
     if os.environ.get("WIRING", "") == "structured":
         from wiring_engineer import FAMILIES, site_masks
-        node_ids = np.load("/home/spec/chess-lab/node_ids.npy")
+        node_ids = np.load(_LAB + "/node_ids.npy")
         masks = site_masks(node_ids)
         cols_all = flyfeat_cb.FEATURE_KEYS
         rngw = random.Random(9001)
@@ -1229,7 +1294,7 @@ def main_tb(steps):
                   sel_boards=sel, readout=readout, wiring=wiring).to(DEV)
     if retino_mode in ("geo", "shuf"):
         model.retino = rmap
-        model.retino_gain = torch.nn.Parameter(torch.ones(5) * 2.0).to(DEV)
+        model.retino_gain = torch.nn.Parameter(torch.ones(7) * 2.0).to(DEV)
     if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
         model.load_state_dict(torch.load(STATE, weights_only=True),
                               strict=False)
@@ -1441,7 +1506,6 @@ def main():
         main_tb(steps)
         return
     torch.manual_seed(0)                     # deterministic init + selection
-    v3.feat_vec(chess.Board())
     flyfeat_cb.feat_vec(chess.Board())
     retino_mode = os.environ.get("RETINO", "")
     if retino_mode in ("geo", "shuf"):
@@ -1453,7 +1517,7 @@ def main():
     wiring = None
     if os.environ.get("WIRING", "") == "structured":
         from wiring_engineer import FAMILIES, site_masks
-        node_ids = np.load("/home/spec/chess-lab/node_ids.npy")
+        node_ids = np.load(_LAB + "/node_ids.npy")
         masks = site_masks(node_ids)
         cols_all = flyfeat_cb.FEATURE_KEYS
         rngw = random.Random(9001)
@@ -1492,7 +1556,7 @@ def main():
                   sel_boards=sel, readout=readout, wiring=wiring).to(DEV)
     if retino_mode in ("geo", "shuf"):
         model.retino = rmap
-        model.retino_gain = torch.nn.Parameter(torch.ones(5) * 2.0).to(DEV)
+        model.retino_gain = torch.nn.Parameter(torch.ones(7) * 2.0).to(DEV)
     if os.path.exists(STATE) and os.environ.get("FRESH", "0") != "1":
         model.load_state_dict(torch.load(STATE, weights_only=True),
                               strict=False)
@@ -1537,7 +1601,6 @@ def main():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "smoke":
         import flyfeat_cb as fc
-        v3.feat_vec(chess.Board())
         fc.feat_vec(chess.Board())
         v0, NAMES = fc.feat_vec(chess.Board())
         rng = random.Random(5)

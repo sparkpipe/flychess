@@ -363,23 +363,13 @@ def gen_stage(rng, stage, batch, piece=None):
                         continue
                     b.set_piece_at(rng.choice(cands),
                                    chess.Piece(pt2, chess.BLACK))
+                # operator ruling: the impulse is ALWAYS to push at this
+                # level — attacked promotion squares stay in the data as
+                # distractors; suppression is a later layer's job
                 push = chess.Move(my_sq, ahead)
-                pushes = [m for m in b.legal_moves
-                          if m.from_square == my_sq]
-                if not pushes:
+                if push not in b.legal_moves:
                     continue
-                safe_push = (not b.is_attacked_by(chess.BLACK, ahead)
-                             and push in b.legal_moves)
-                if safe_push:
-                    spec = {"leg_sq": my_sq, "cls": 2, "target_mv": push}
-                else:
-                    alts = [m for m in b.legal_moves
-                            if m.from_square == my_sq and m != push]
-                    if not alts:
-                        continue
-                    spec = {"leg_sq": my_sq, "cls": 1,
-                            "target_mv": alts[0]}   # restraint
-                b = b
+                spec = {"leg_sq": my_sq, "cls": 2, "target_mv": push}
             else:  # castle
                 # K e1 + R h1 (O-O) with rights; half the time an enemy
                 # attacker covers a transit square -> castling illegal

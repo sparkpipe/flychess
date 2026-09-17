@@ -1322,10 +1322,10 @@ def milestone_stage3(model, opt):
 S4_MODES = ["their_king", "pin", "fork", "discovered"]
 
 
-def eval_ce(model, mode, n=96, seed=7000):
+def eval_ce(model, mode, n=96, seed=7000, stage=4):
     """CE-mode battery: argmax over legal moves must pick target_mv."""
-    rng = random.Random(seed + _phash(mode) % 9973)
-    boards_specs = gen_stage(rng, 4, n, piece=mode)
+    rng = random.Random(seed + _phash(mode or "mate1") % 9973)
+    boards_specs = gen_stage(rng, stage, n, piece=mode)
     fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
     reach = np.stack([reach_map(b, spec.get("leg_sq"))
                       for b, spec in boards_specs]) \
@@ -1500,6 +1500,99 @@ def milestone_stage4(model, opt):
     torch.save(model.state_dict(), STATE)
     print("STAGE 4 ALL MILESTONES PASSED", flush=True)
     return True
+
+
+def milestone_stage5(model, opt):
+    """Stage 5: basic mates — KQvK mate-in-1 CE at 100% on a 200-board
+    held-out battery (the S5 spec gate); stages 1-4 maintenance replay."""
+    logf = open(LOGF, "a")
+
+    def eval_held(n=200):
+        return eval_ce(model, None, n=n,
+                       seed=7000 + _phash("mate1_held") % 9973, stage=5)
+
+    print("=== S5 MILESTONE mate1 ===", flush=True)
+    rng = random.Random(9000 + _phash("mate1") % 104729)
+    prior = [(st, p) for st in (1, 2, 3) for p in PIECE_ORDER]
+    for step in range(1, 4001):
+        train_stage(model, opt, 5, 1, rng)
+        if prior and rng.random() < 0.35:
+            _w = [max(0.02, 0.98 - LAST_ACC.get((_s, _p), 0.9))
+                  for _s, _p in prior]
+            stp, pcp = rng.choices(prior, weights=_w)[0]
+            train_stage(model, opt, stp, 1, rng, piece=pcp)
+        if step % 110 == 0:
+            if maintain_regressions(model, opt, prior, rng):
+                print("MAINTENANCE-ABORT s5:mate1 — prior battery "
+                      "cannot hold 0.98", flush=True)
+                torch.save(model.state_dict(), STATE)
+                return False
+        pair, failures = eval_held()
+        if step % 20 == 0 or pair >= 1.0:
+            rec = {"s5_milestone": "mate1", "step": step,
+                   "score": round(pair, 4)}
+            print(json.dumps(rec), flush=True)
+            logf.write(json.dumps(rec) + "\n"); logf.flush()
+        if pair < 1.0:
+            continue
+        print(f"S5 MILESTONE mate1 PASS at step {step}", flush=True)
+        torch.save(model.state_dict(), STATE)
+        parts = []
+        blocked = None
+        for st in (1, 2, 3):
+            for p2 in PIECE_ORDER:
+                pr, fails = eval_piece(model, p2, n=64, stage=st)
+                steps = 300
+                for rnd in range(3):
+                    if pr >= 0.98:
+                        break
+                    train_stage(model, opt, st, steps,
+                                random.Random(9500 + st * 31
+                                              + _phash(p2) + rnd),
+                                piece=p2)
+                    pr, fails = eval_piece(model, p2, n=64, stage=st)
+                    steps *= 2
+                if pr < 0.98:
+                    if pr >= 0.975:
+                        print(f"  MARGINAL s{st}:{pname(p2)} "
+                              f"accepted at {pr:.3f}", flush=True)
+                    else:
+                        blocked = (f"s{st}:{pname(p2)}", pr, fails)
+                parts.append(f"s{st}:{pname(p2)}={round(pr, 3)}")
+        for m2 in S4_MODES:
+            pr, fails = eval_ce(model, m2, n=64)
+            steps = 300
+            for rnd in range(3):
+                if pr >= 0.98:
+                    break
+                train_stage(model, opt, 4, steps,
+                            random.Random(9700 + _phash(m2) + rnd),
+                            piece=m2)
+                pr, fails = eval_ce(model, m2, n=64)
+                steps *= 2
+            if pr < 0.98:
+                if pr >= 0.975:
+                    print(f"  MARGINAL s4:{m2} accepted at "
+                          f"{pr:.3f}", flush=True)
+                else:
+                    blocked = (f"s4:{m2}", pr, fails)
+            parts.append(f"s4:{m2}={round(pr, 3)}")
+        pr5, _ = eval_held(n=64)
+        parts.append(f"s5:mate1={round(pr5, 3)}")
+        print("S5 REGRESSION-SWEEP " + " ".join(parts), flush=True)
+        if blocked:
+            nm, pr, fails = blocked
+            print(f"S5 SWEEP-BLOCKED {nm} at {pr:.3f}", flush=True)
+            for f in (fails or [])[:6]:
+                print(f"  FAIL {f}", flush=True)
+            torch.save(model.state_dict(), STATE)
+            return False
+        torch.save(model.state_dict(), STATE)
+        print("STAGE 5 ALL MILESTONES PASSED", flush=True)
+        return True
+    print("S5 MILESTONE mate1 EXHAUSTED at cap (4000)", flush=True)
+    torch.save(model.state_dict(), STATE)
+    return False
 
 
 def eval_piece_boards(model, boards_specs):
@@ -2053,6 +2146,9 @@ def main():
         return
     if stage == 4:
         milestone_stage4(model, opt)
+        return
+    if stage == 5:
+        milestone_stage5(model, opt)
         return
     rng = random.Random(1000 + stage)
     train_stage(model, opt, stage, steps, rng)

@@ -76,5 +76,6 @@ run1 l6_king   "rook,bishop,queen,knight,pawn,ep,promo,king,castle" fly_cb_v3_l6
 runN s2 2 fly_cb_v3_l6.pt fly_cb_v3_s2.pt
 runN s3 3 fly_cb_v3_s2.pt fly_cb_v3_s3.pt
 runN s4 4 fly_cb_v3_s3.pt fly_cb_v3_s4.pt
+runN s5 5 fly_cb_v3_s4.pt fly_cb_v3_s5.pt
 
-echo "=== CURRICULUM V3 COMPLETE — v3 lineage through stage 4 ===" >> "$LOG"
+echo "=== CURRICULUM V3 COMPLETE — v3 lineage through stage 5 ===" >> "$LOG"

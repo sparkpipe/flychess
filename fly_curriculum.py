@@ -705,14 +705,17 @@ def gen_stage(rng, stage, batch, piece=None):
                     rng.choice([chess.ROOK, chess.QUEEN]), chess.BLACK))
                 cands = [m for m in b.legal_moves
                          if m.from_square == front_sq]
-                # a discovery = front piece moves OFF the slider's ray
-                ray = b.attacks_mask(slider_sq)
+                # a discovery = front piece leaves the slider->target line;
+                # the slider's other rays were never blocked, so a landing
+                # on them (e.g. the perpendicular file) is still a discovery
+                seg = chess.between(slider_sq, tgt_sq) \
+                    | chess.BB_SQUARES[tgt_sq]
                 opens = [m for m in cands
-                         if not (ray & chess.BB_SQUARES[m.to_square])]
+                         if not (seg & chess.BB_SQUARES[m.to_square])]
                 if not opens:
                     continue
                 # deterministic preferred target: captures first, then
-                # farthest-from-ray; eval accepts ANY valid discovery
+                # farthest-from-front; eval accepts ANY valid discovery
                 caps = [m for m in opens if b.is_capture(m)]
                 pool = caps or opens
                 tgt = max(pool, key=lambda m: chess.square_distance(

@@ -1,4 +1,4 @@
-# FLYCHESS HANDOFF — runtime state for the next session (2026-09-17 22:40 UTC)
+# FLYCHESS HANDOFF — runtime state for the next session (2026-09-17 23:05 UTC)
 
 *Read DESIGN.md first (same directory; also at ~/chess-lab/DESIGN.md on rtx5090) —
 the architecture, laws, and roadmap. This doc = the RUNTIME state and the open threads.*
@@ -6,44 +6,50 @@ the architecture, laws, and roadmap. This doc = the RUNTIME state and the open t
 ## Where the program is (one paragraph)
 
 The fly plays chess through a gated curriculum on a frozen Drosophila
-connectome (MaleCNS, 188,778 neurons). The movement foundation (stages 1–4:
-movement, blocking, protection, king-safety/pins/forks/discovered) is being
-RETRAINED from scratch under the normalized dynamics (ANORM=1) + the full
-adaptive stack — L1–L5 + stages 2–3 PASSED at pace parity-or-better vs the
-saturated lineage; stage 4's fork took its floor-accepted marginal pass
-(0.979) and DISCOVERED (the historical wall) is re-grinding now. The
-imagination layer (the world model) graduated twice (0.9977/0.9974 depth-1/2
-verified). The eval layer (the universal differential + the danger veto) is
-designed, implemented in the rig, and awaits stage 5's semantics. The H01
-human cortical connectome (910G) is downloaded and format-decoded; the edge
-table extraction is the next build. The prior-art target: mlabonne/chessfly
-(30.4% SF agreement, MAE 0.081 — the adult FlyWire with trainable synapses).
+connectome (MaleCNS, 188,778 neurons). **THE MOVEMENT FOUNDATION IS
+COMPLETE: the v3+ANORM chain finished 2026-09-17 22:59 UTC — all 6 lessons
++ stages 2/3/4 PASSED, final sweep 27/27 batteries pass (worst 0.982
+s1:castle; fork 1.0, discovered 1.0, pin 1.0). PR #1 MERGED to master.**
+The last wall (discovered at 0.958 for 5.5h/193 plateau cycles) was a
+BATTERY ANSWER-KEY BUG, not capacity: the generator's discovery test used
+the slider's FULL attack mask (rejecting chess-valid discoveries that land
+on the unblocked perpendicular ray), and separately rejected
+capture-of-target — but the model correctly prefers winning the queen
+outright. Both fixed (segment test + capture acceptance), verified by
+answer-key spot test, and the resumed weights passed everything at step 1.
+The imagination layer graduated twice (0.9977/0.9974 depth-1/2 verified;
+0.963 dense-OOD gap). The H01 human cortical connectome (910G) is
+downloaded, audited (only the raw-EM layer missing — not needed), ids
+enumerated; the edge table is the next build. Prior-art target:
+mlabonne/chessfly (30.4% SF agreement, MAE 0.081).
 
 ## The running processes (rtx5090:~/chess-lab)
 
 | process | state | notes |
 |---|---|---|
-| `curriculum_v3.sh` (ANORM=1) | RUNNING, pid ~1544918 | stage 4 re-grind: discovered at ~0.854 climbing; fork took marginal at cap (0.979); per-lesson checkpoints fly_cb_v3_s4.pt |
-| fly_imagine retrain | RELAUNCHED 22:4x after the fi-eval_battery NameError fix | I1 regrind; ISTATE=fly_imagines_retrain.pt, ISKIP=1, ILR=1.5e-4; log imagine_retrain.out |
+| `curriculum_v3.sh` (ANORM=1) | **COMPLETE — do not relaunch** | log ends "CURRICULUM V3 COMPLETE"; checkpoints fly_cb_v3_l1..l6.pt + s2/s3/s4.pt |
+| imagination retrain | GRADUATED (standing) | fly_imagines_retrain.pt; rig verdict loop_rig_verdict.json |
 | H01 extraction | DOWN by design | the relationship-file decode is the blocker; see below |
 
-## The v3+ANORM chain — what to watch
+## The discovered-battery lesson (the new laws)
 
-- The chain log: curriculum_v3.log; the per-stage outputs v3_s2/s3/s4.out.
-- The discovered battery: if it gates (0.98) → stage 4 completes → the
-  normalization A/B verdict = PASSED → the differential build (D1/D2) starts.
-- If it exhausts below floor (best <0.9745 at 4000) → the chain FAILs → await
-  adjustment (do not blind-relaunch; the tiered acceptance already ran).
-- The exhaustion-acceptance is NOW in the S4 loop (the fork's 0.979 cap-exit
-  was the trigger for adding it — the pre-patch code hard-exited).
-
-## The imagination retrain — the open bug just fixed
-
-The retrain crashed at its first I2 eval: `NameError: fi is not defined` —
-my LP-wiring patch referenced `fi.eval_battery` inside fly_imagine.py
-itself. Fixed to the module-local `eval_battery` and relaunched (resumes
-from fly_imagines_retrain.pt = the I1-pass weights). If it crashes again at
-an eval: check for OTHER stale self-references in the LP block.
+1. **A concept battery must not penalize the better chess move.** When a
+   discovery position also offers an outright win of the target piece, the
+   model that takes the queen is RIGHT; the eval must accept both the
+   discovery and the capture-of-target. (This was the second half of the
+   0.958 pin — introduced by the first fix, caught live in the relaunch's
+   tail, fixed the same hour.)
+2. **Discovery = leaving the blocked slider→target segment**
+   (`chess.between(slider,tgt) | {tgt}`), never "off the slider's full
+   attack mask" — perpendicular-ray landings (e6f8/d4e6 class) are true
+   discoveries. For a knight front EVERY move discovers (28/28 boards, 0
+   excluded moves); the concept only bites for rook/bishop fronts
+   (along-line stays stay rejected — 64 exclusions in the battery).
+3. **The spot-test that matters for a battery bug is the ANSWER KEY
+   itself** — regenerate the seeded battery, assert the failing picks are
+   accepted and the concept guards still reject. Model-free, deterministic,
+   one ssh. (The relaunch then passed at step 1, as predicted: 0.958 + 4
+   flips + 6 capture-accepts → 1.0.)
 
 ## The H01 extraction — the state and the blocker
 
@@ -51,9 +57,10 @@ an eval: check for OTHER stale self-references in the LP block.
   list_labels (the reader's list_labels(fn, path="") — the path arg must be
   EMPTY or the join doubles: by_id/by_id/00.shard).
 - by_id/00.shard was a FAILED DOWNLOAD (0 bytes local vs 345,196,050 on GCS,
-  md5 HF0WPqOL7jF+D0Wa7Iaopw==) — RE-FETCHED and verified. The receipt's
-  aggregate-byte check masked it; the full per-file audit found only the
-  intentionally-skipped 4nm_raw prefix missing.
+  md5 HF0WPqOL7jF+D0Wa7Iaopw==) — RE-FETCHED and verified. The full per-file
+  audit: only 12 files MISSING, ALL in 4nm_raw (raw EM imagery, ~72G of
+  ~1.1T) — NOT needed for the memory/search experiments; the dataset is
+  complete for our purposes.
 - **The blocker**: the pre/post_synaptic_cell relationship lookups return
   None for every synapse (edges=0 after 1.9M ids). The relationship files'
   internal organization does NOT match the (id>>10)&8191 minishard formula —
@@ -74,17 +81,20 @@ an eval: check for OTHER stale self-references in the LP block.
 
 ## The queued builds (in order)
 
-1. **Stage 4 completion** (discovered) — the A/B verdict.
+1. **Stage 5 mates** — imagination-for-depth + check semantics + the
+   dense-board curriculum (the 0.963 OOD gap). The movement weights
+   (fly_cb_v3_s4.pt) are the substrate.
 2. **The differential head D1/D2** (the 4096-slot option-space differential,
    rule-derived training) — attaches to the completed movement weights.
-3. **Stage 5 mates** + the dense-board curriculum (the 0.963 OOD gap).
-4. **The Lichess CC0 corpus** fetch (4.4M SF-annotated positions) — the D3
+3. **The Lichess CC0 corpus** fetch (4.4M SF-annotated positions) — the D3
    calibration + chessfly-comparable training.
-5. **The H01 edge-table extraction** + the book-memory experiment.
-6. **The opening module** (the operator's gambit spec: BD/Von Popiel/
+4. **The H01 edge-table extraction** + the book-memory experiment.
+5. **The opening module** (the operator's gambit spec: BD/Von Popiel/
    Smith-Morra/Budapest/Englund/Latvian as the exemplars; the initiative
    ledger bands +1/+2/+3; the asymmetric scoring win 1.0/draw 0.4-0.45).
-7. **Stage 6 Dvoretsky** (tablebase-gated, zugzwang-correct).
+6. **Stage 6 Dvoretsky** (tablebase-gated, zugzwang-correct).
+7. **The personality adapters** (Morphy/Capablanca/Carlsen) + the H01
+   search substrate.
 
 ## The benchmark ladder
 
@@ -97,17 +107,21 @@ an eval: check for OTHER stale self-references in the LP block.
 
 Scaffold-free gates; the spot-test asymmetry; the at-rail probe; stable
 seeds; the tiered acceptance (0.98/0.975/0.95); the v3 chain never killed
-mid-lesson; pkill alone; the local-canonical patch flow; the PR flow
-(branch → test → PR #1 → merge at stability); fresh-tail liveness.
+mid-lesson; pkill alone (bracket pattern — the bare pattern self-matches
+the ssh-spawned shell, exit 255); the local-canonical patch flow; the PR
+flow (branch → test → PR → merge at stability — MERGED 0b535eb, master is
+canonical); fresh-tail liveness; gh merges need the ~/sparkpipe/.env PAT
+(keychain creds are stale; the PAT also lacks the PR-merge API scope —
+merge via git locally + push, the PR auto-closes).
 
 ## The key artifacts
 
 - The checkpoints: fly_cb_v3_l1..l6.pt, fly_cb_v3_s2/s3/s4.pt (the ANORM
-  lineage); fly_imagines_retrain.pt (the imagination deliverable);
-  fly_sees_current.pt (the vision deliverable); the graduated arms archived
-  at /mnt/model-warm/flychess-archive/graduated-arms/; the saturated lineage
-  at archive/v3_saturated/ on the node.
-- The PR: sparkpipe/flychess#1 (adaptive-stack-2026-09 → master).
+  lineage — THE movement deliverable); fly_imagines_retrain.pt (the
+  imagination deliverable); fly_sees_current.pt (the vision deliverable);
+  the graduated arms archived at /mnt/model-warm/flychess-archive/; the
+  saturated lineage at archive/v3_saturated/ on the node.
+- The repo: sparkpipe/flychess, master @ 0b535eb (PR #1 MERGED).
 - The design: DESIGN.md (repo + node). The prior art: mlabonne/chessfly (HF).
 - The H01: /mnt/model-warm/human-h01-connectome (910G, verified); the ids
   checkpointed at h01_ids.npy; the extraction h01_extract_full.py.

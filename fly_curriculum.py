@@ -721,7 +721,9 @@ def gen_stage(rng, stage, batch, piece=None):
                 tgt = max(pool, key=lambda m: chess.square_distance(
                     m.to_square, front_sq))
                 spec = {"target_mv": tgt, "cls": 2,
-                        "target_set": {m.uci() for m in opens},
+                        "target_set": {m.uci() for m in opens}
+                        | {m.uci() for m in cands
+                           if m.to_square == tgt_sq},
                         "eval_from": front_sq}
             out.append((b, spec))
         elif stage == 5:

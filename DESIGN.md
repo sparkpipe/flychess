@@ -183,3 +183,16 @@ killed mid-lesson; maintenance runs inside the loop. 7. pkill patterns run
 ALONE in their own ssh. 8. Patches: local canonical file → assert-guarded →
 smoke → ship. 9. PR flow: branch → test → PR → merge at stability.
 10. Verify training liveness with fresh tails, never stale reports.
+
+## Ops addendum — H01 extraction relaunch (2026-09-17, fix-as-found)
+
+The driver's H01 relaunch line must run the VENV python:
+`cd ~/chess-lab && H01_TARGET=12000000 nohup ~/chess-lab/.venv312/bin/python3 h01_extract_full.py > h01_extract.log 2>&1 < /dev/null &`
+— bare `python3` is system 3.14 (no cloud-volume wheel; instant ModuleNotFoundError).
+Probe liveness with `pgrep -f h01_extract_full` (a `h01_extract[.]py` pattern
+never matches `h01_extract_full.py` — false DOWNs). If a relaunch dies with
+`OSError Errno 28` (disk full on /), clear `~/.cache/pip ~/.cache/uv` first
+(kept ~1.4G on 2026-09-17; leave ~/.cache/huggingface — the champion lane's
+fetchers need it). The enumeration phase re-runs from shard 00 each relaunch
+(~1 min/shard, by_id shards ~72MB); edge parts in h01_edges/ are checkpointed
+and idempotent-skipped.

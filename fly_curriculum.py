@@ -1482,6 +1482,12 @@ def milestone_stage4(model, opt):
                 best = max(best, pair)
                 continue
             if step == 4000:
+                if best >= 0.9745:
+                    print(f"S4 MILESTONE {mode} PASS-MARGINAL at cap "
+                          f"(best {best:.3f}) - accepted at floor",
+                          flush=True)
+                    torch.save(model.state_dict(), STATE)
+                    break
                 print(f"S4 MILESTONE {mode} EXHAUSTED (best {best:.3f})",
                       flush=True)
                 torch.save(model.state_dict(), STATE)

@@ -196,3 +196,16 @@ never matches `h01_extract_full.py` — false DOWNs). If a relaunch dies with
 fetchers need it). The enumeration phase re-runs from shard 00 each relaunch
 (~1 min/shard, by_id shards ~72MB); edge parts in h01_edges/ are checkpointed
 and idempotent-skipped.
+
+### H01 extraction BLOCKED 2026-09-17 23:59 — Ceph object fault (escalated)
+
+`by_id/01.shard` (362,038,315 B) is UNREADABLE: fresh-process reads hang at
+any offset/leash (D-state folio_wait_bit_common, 100s+ leashes, all block
+sizes); peer objects read fine (00.shard incl. its 300MB tail, 02.shard,
+64KB reads). Signature = the folio_wait wedge class, but object-specific —
+suspect bad extent/OSD placement or stuck MDS cap on that object.
+DO NOT relaunch the extraction while this stands (the enumeration wedges at
+shard 01 deterministically; wedged procs go D-state, TERM-immune, linger).
+One lingering D-state proc is tolerated (0.4% CPU, pgrep-visible so the
+driver's H01 rule reads it as alive). Resume extraction after the sysadmin
+clears the object; enumeration restarts from shard 00 (idempotent parts).

@@ -2014,13 +2014,16 @@ def graded_targets(entry, b):
             continue
         o = ours(cc)
         dtz = c.get("dtz")
-        child_ours[uci] = (o, dtz if dtz is not None else 99)
+        child_ours[uci] = (o, dtz if dtz is not None else None)
     if cat in ("win", "cursed_win"):
         winners = [(u, d) for u, (o, d) in child_ours.items() if o == "loss"]
-        best_dtz = min((d for _, d in winners), default=99)
+        known = [d for _, d in winners if d is not None]
+        best_dtz = min(known) if known else None
         for u, (o, d) in child_ours.items():
             if o == "loss":
-                if d >= 98:                    # counter cliff: win evaporates
+                if d is None:                  # SF-graded row: no DTZ ladder
+                    vals[u] = 1.0
+                elif d >= 98:                  # counter cliff: win evaporates
                     vals[u] = -0.4
                 else:
                     vals[u] = 1.0 - min(d - best_dtz, 30) * 0.02

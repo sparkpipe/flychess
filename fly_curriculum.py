@@ -2080,32 +2080,37 @@ def tb_step(model, opt, rows, rng):
     fvb, slots, tgts, cl = build_tb_batch(rng, rows, B)
     a = model.propagate(fvb)
     Bn = a.shape[1]
-    cols = torch.arange(Bn, device=DEV).unsqueeze(1)
     cls = model.theta_cls.unsqueeze(0) * torch.tanh(a[model.cls_idx].T / 4.0)
     loss_cls = torch.nn.functional.cross_entropy(cls, cl)
-    # per-move value regression on raw slot logits
-    losses = []
-    ce_terms = []
-    marg = []
+    # VECTORIZED row scores: padded [B, M] gather in ONE fused op — the
+    # per-row loop with host->device tensor creation sync-stalled the GPU
+    # ~7x (500 steps in 10 min). Masked huber regression + one masked CE
+    # on the TB-best index (the operator's "reinforce the best move": pure
+    # regression left the argmax pinned at 0.47 for 50k steps).
+    M = max(len(sv) for sv, _ in slots)
+    Sidx = np.zeros((len(slots), M), dtype=np.int64)
+    Vt = np.zeros((len(slots), M), dtype=np.float32)
+    Msk = np.zeros((len(slots), M), dtype=bool)
     for i, (sv, vv) in enumerate(slots):
-        if len(sv) < 2:
-            continue
-        s = torch.from_numpy(sv).to(DEV)
-        t = torch.from_numpy(vv).to(DEV)
-        Trow = model.theta[s] * a[model.readout_idx[s], i] \
-            + torch.zeros(len(s), device=DEV)
-        losses.append(torch.nn.functional.huber_loss(Trow, t, delta=0.5))
-        # operator Dvoretsky spec: REINFORCE the best move (the graded
-        # regression alone fits values but leaves the argmax wrong on
-        # near-ties — measured: gate pinned 0.47 for 50k steps while the
-        # loss fell to 0.16; CE on the TB-best index optimizes the gate
-        # metric directly)
-        if tgts[i] >= 0:
-            marg.append(torch.nn.functional.cross_entropy(
-                Trow.unsqueeze(0),
-                torch.tensor([tgts[i]], device=DEV)))
-    loss_val = torch.stack(losses).mean() if losses else torch.zeros((), device=DEV)
-    loss_m = torch.stack(marg).mean() if marg else torch.zeros((), device=DEV)
+        L = len(sv)
+        Sidx[i, :L] = sv
+        Vt[i, :L] = vv
+        Msk[i, :L] = True
+    S = torch.from_numpy(Sidx).to(DEV)
+    cols = torch.arange(Bn, device=DEV).unsqueeze(1)
+    T = model.theta[S] * a[model.readout_idx[S], cols]
+    T = T.masked_fill(torch.from_numpy(~Msk).to(DEV), 0.0)
+    tv = torch.from_numpy(Vt).to(DEV)
+    hub = torch.nn.functional.huber_loss(T, tv, delta=0.5, reduction="none")
+    loss_val = hub[torch.from_numpy(Msk).to(DEV)].mean()
+    tgt = torch.from_numpy(np.array(tgts, dtype=np.int64)).to(DEV)
+    has_best = tgt >= 0
+    if has_best.any():
+        loss_m = torch.nn.functional.cross_entropy(
+            T[has_best], tgt[has_best],
+            ignore_index=-1)
+    else:
+        loss_m = torch.zeros((), device=DEV)
     loss = loss_val * 2.0 + loss_cls + loss_m
     opt.zero_grad()
     loss.backward()

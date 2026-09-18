@@ -8,6 +8,11 @@ accuracy >= 0.98 (the real target), depth-2 end-reach >= 0.95.
 import os, sys, json, time, random
 import numpy as np
 import torch
+# GPU trainers need no CPU thread army: PyTorch's default OpenMP
+# pool is 2x cores (56 threads on 24) — pure contention with the
+# co-resident trainers. Cap in code; no env needed.
+torch.set_num_threads(8)
+
 import chess
 
 _LAB = os.path.expanduser("~") + "/chess-lab"

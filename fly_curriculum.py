@@ -20,6 +20,11 @@ State: fly_cb.pt  (evolving; stages build on the previous stage's weights)
 import sys, os, json, time, random, chess, zlib
 import numpy as np
 import torch
+# GPU trainers need no CPU thread army: PyTorch's default OpenMP
+# pool is 2x cores (56 threads on 24) — pure contention with the
+# co-resident trainers. Cap in code; no env needed.
+torch.set_num_threads(8)
+
 
 import os as _o
 _LAB = _o.path.expanduser("~") + "/chess-lab"

@@ -298,7 +298,7 @@ class FlyCB(torch.nn.Module):
             _prev = None
             for _ in range(max_steps):
                 a = (1 - LEAK) * a + LEAK * (self.WT @ a)
-                if os.environ.get("ANORM", "0") == "1":
+                if os.environ.get("ANORM", "1") == "1":
                     a = a / (a.abs().mean() + 1e-6)                         * float(os.environ.get("ANORM_T", "2.0"))
                 else:
                     a = torch.clamp(a, -CAP, CAP)
@@ -318,7 +318,7 @@ class FlyCB(torch.nn.Module):
         _prev = None
         for _ in range(max_steps):
             a = (1 - LEAK) * a + LEAK * (self.WT @ a)
-            if os.environ.get("ANORM", "0") == "1":
+            if os.environ.get("ANORM", "1") == "1":
                 a = a / (a.abs().mean() + 1e-6)                     * float(os.environ.get("ANORM_T", "2.0"))
             else:
                 a = torch.clamp(a, -CAP, CAP)

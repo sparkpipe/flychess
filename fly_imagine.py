@@ -101,7 +101,10 @@ class ImagineFly(torch.nn.Module):
         self.register_buffer(
             "head_idx", torch.from_numpy(
                 rng.permutation(free)[:readout_n].astype(np.int64)).to(DEV))
-        skip = os.environ.get("ISKIP", "0") == "1"
+        # graduated config baked in: planes-skip architecture + normalized
+        # dynamics are how this trainer WON — a launch without env vars
+        # must never silently train the degraded variant
+        skip = os.environ.get("ISKIP", "1") == "1"
         hdims = readout_n + ((PLANES + 1) * 64 if skip else 0)
         self.skip_planes = skip
         self.planes_head = torch.nn.Sequential(
@@ -115,7 +118,7 @@ class ImagineFly(torch.nn.Module):
         s = torch.clamp(self.W_sens(x), -6, 6)
         a = torch.zeros(self.N, x.shape[0], device=DEV)
         a[self.inj_idx] = s.T
-        norm = os.environ.get("ANORM", "0") == "1"
+        norm = os.environ.get("ANORM", "1") == "1"
         tgt = float(os.environ.get("ANORM_T", "2.0"))
         max_steps = int(os.environ.get("IPROP", str(cur.PROP_STEPS)))
         eps = float(os.environ.get("IEPS", "0.02"))
@@ -301,7 +304,8 @@ def main():
         print("resumed", flush=True)
     else:
         print("FRESH imagination fly", flush=True)
-    opt = torch.optim.Adam(model.parameters(), lr=float(os.environ.get("ILR", "3e-4")))
+    opt = torch.optim.Adam(model.parameters(),
+                           lr=float(os.environ.get("ILR", "1.5e-4")))
     for lesson in IORDER:
         print(f"=== I MILESTONE {lesson} ===", flush=True)
         rng = random.Random(8000 + (0 if lesson == "I1" else

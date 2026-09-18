@@ -1718,12 +1718,10 @@ def eval_piece_boards(model, boards_specs):
     with torch.no_grad():
         a = model.propagate(fvb, reach=reach)
     geo = model.geo_w(model.slot_geo).squeeze(-1).detach().cpu().numpy()
+    ctx = make_score_ctx(model)
+    wmv = ctx["wmv"]
     ok = tot = 0
     failures = []
-    wmv = model.theta_mv.detach().cpu().numpy()
-    wp = float(model.w_pseudo.detach())
-    wp2 = float(model.w_pseudo2.detach())
-    wt = float(model.w_threat.detach())
     for i, (b, spec) in enumerate(boards_specs):
         sq = spec.get("leg_sq")
         if sq is None:
@@ -1734,8 +1732,6 @@ def eval_piece_boards(model, boards_specs):
             continue
         act = a[model.readout_idx.cpu().numpy(), i].detach().cpu().numpy()
         pc = b.piece_at(sq)
-        p2 = {pm.to_square for pm in b.pseudo_legal_moves
-              if pm.from_square == sq}
         wpc = model.theta_mv_pc[_PC_IDX[pc.piece_type]].detach() \
             .cpu().numpy()
         def score(t):
@@ -1755,9 +1751,8 @@ def eval_piece_boards(model, boards_specs):
                 thr = min(bin(b.attacks_mask(t)
                               & b.occupied_co[b.turn]).count("1"), 4) / 4.0
                 b.pop()
-            return (float(model.theta[slot].detach()) * act[slot]
-                    + geo[slot] + float(mf @ (wmv + wpc)) + wp * ps
-                    + wt * thr)
+            return score_terms(ctx, float(model.theta[slot].detach()),
+                               act[slot], geo[slot], mf, wpc, ps, 0.0, thr)
         for lt in list(legal)[:3]:
             for it in illegal[:3]:
                 tot += 1

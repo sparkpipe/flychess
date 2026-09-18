@@ -156,7 +156,7 @@ def main():
                     b.pop()
                 except Exception:
                     dtz = None
-            children[u] = {"cat": ccat, "dtz": dtz, "sf": int(sc) if not sc.is_mate() else None}
+            children[u] = {"cat": ccat, "dtz": dtz, "sf": sc.score() if not sc.is_mate() else None}
 
         if cat is None:
             # no book verdict, no TB reach: majority of SF child categories

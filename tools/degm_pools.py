@@ -23,7 +23,7 @@ import chess.pgn
 
 PGN = os.path.expanduser("~/chess-lab/books/DEGM.pgn")
 OUT = os.path.expanduser("~/chess-lab/books/degm_pools")
-SYZYGY = os.path.expanduser("~/chess-lab/syzygy")
+SYZYGY = os.path.expanduser("~/syzygy")
 SF = "/usr/games/stockfish"
 DEPTH = 18
 

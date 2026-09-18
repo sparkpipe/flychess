@@ -1883,7 +1883,9 @@ def milestone_stage1(model, opt):
 
 def main_tb(steps):
     """Stage 6: exact tablebase endings, graded move-value training."""
-    rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP"])
+    rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP",
+                       "KQvKB", "KQvKN", "KQvKP", "KQvKR",
+                       "KRPvKR", "KRvKB", "KRvKN", "KRvKP", "KRvKR"])
     torch.manual_seed(0)                     # deterministic init + selection
     flyfeat_cb.feat_vec(chess.Board())
     retino_mode = os.environ.get("RETINO", "")
@@ -1952,11 +1954,14 @@ def main_tb(steps):
             l = tb_step(model, opt, rows, rng)
         torch.save(model.state_dict(), STATE + ".tmp")
         os.replace(STATE + ".tmp", STATE)
-        pair_gate, top = gate_tb(model, rows, random.Random(777))
+        pair_gate, top, fam = gate_tb(model, rows, random.Random(777))
+        worst = min(fam.values()) if fam else 0.0
         rec = {"stage": 6, "step": step, "loss": round(l, 4),
-               "opt_set": round(pair_gate, 4),
-               "pass": bool(pair_gate >= 0.98)}
+               "opt_set": round(pair_gate, 4), "worst_fam": worst,
+               "pass": bool(pair_gate >= 0.98 and worst >= 0.98)}
         print(json.dumps(rec), flush=True)
+        print("S6 FAM " + " ".join(f"{k}={v}" for k, v in fam.items()),
+              flush=True)
         with open(LOGF, "a") as f:
             f.write(json.dumps(rec) + "\n")
         if rec["pass"]:
@@ -1984,7 +1989,7 @@ def load_pools(names):
             with open(p) as f:
                 for line in f:
                     try:
-                        rows.append(json.loads(line))
+                        rows.append(dict(json.loads(line), pool=nm))
                     except Exception:
                         pass
     print(f"pools {names}: {len(rows)} exact-labeled positions", flush=True)
@@ -2123,9 +2128,12 @@ def gate_tb(model, rows, rng):
     """Gate: argmax(value head) ∈ optimal-move set on held-out entries."""
     model.eval()
     ok = tot = 0
+    fam = {}
     with torch.no_grad():
         for _ in range(400):
             e = rows[rng.randrange(len(rows))]
+            pn = e.get("pool", "?")
+            fst = fam.setdefault(pn, [0, 0])
             try:
                 b = chess.Board(e["fen"])
             except Exception:
@@ -2150,9 +2158,14 @@ def gate_tb(model, rows, rng):
                           "cursed_win": "cursed_loss",
                           "cursed_loss": "cursed_win"}.get(c.get("cat")) == opt}
             tot += 1
+            fst[1] += 1
+            fst[0] += int(pick.uci() in optset)
             ok += int(pick.uci() in optset)
     model.train()
-    return ok / max(tot, 1), tot
+    fam = {}
+    for nm, (fok, ftot) in sorted(fam.items()):
+        fam[nm] = round(fok / max(ftot, 1), 3)
+    return ok / max(tot, 1), tot, fam
 
 
 def main():

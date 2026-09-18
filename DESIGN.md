@@ -235,3 +235,44 @@ checkmate."
      the band or throws away a forced win.
 3. The SF-scored all-moves harness is built with the D1/D2 differential
    head (it is also the D3 calibration substrate).
+
+## THE FULL TACTICS PROGRAM (operator directive, 2026-09-18)
+
+After the endgame training completes, the fly gets the full tactics
+curriculum in three layers:
+
+### T0 — Mates ladder (the 8-ply lookahead vehicle)
+- Mate in 1 (done: stage 5, all-mates key) and mate in 2: GATE = 0.98.
+- Mate in 3 and mate in 4: built and trained, but 98% NOT required at this
+  stage — their purpose is to DEBUG the 8-ply lookahead (4 attacker moves
+  x defender replies) through the imagination operator's depth-chains
+  (I3 graduated depth-2/3; this pushes depth-4).
+- Generators: SF-assisted construction — random sparse boards, SF analysis
+  keeps positions whose best score is EXACTLY mate-in-N (no faster), with
+  the defender's replies verified forced (all replies -> mate-in-(N-1)).
+  Labels: the mating key move set; training = teacher-forced imagination
+  rollouts + the value head on the terminal mate.
+
+### T1 — Tactical motifs in isolation (each to 0.98)
+The motif taxonomy = the Lichess puzzle-database theme list (the
+authoritative enumeration): mate/mateIn1..5, fork, pin, skewer,
+discoveredAttack, doubleCheck, hangingPiece, sacrifice,Deflection,
+decoy, trappedPiece, overload, interference, clearance, xRay,
+zwischenzug, backRankMate, promotion, zugzwang, desperado, attraction,
+advancedPawn, battery,QuietMove ... Each motif = its own pool (filter the
+puzzle DB by theme), trained in isolation to the 0.98 floor on the same
+per-family gate table (the checklist law).
+
+### T2 — Difficulty-layered full coverage
+The Lichess puzzle DB (CC0, millions of puzzles, each with FEN, the FULL
+solution move sequence, Glicko rating, and themes) layered by rating
+bands (e.g. <1200, 1200-1600, 1600-2000, 2000-2400, 2400+). FULL coverage
+of tactics at each band: gate = per-band AND per-motif-cell at 0.98 — the
+biggest pass table yet. Non-solution moves graded by Stockfish per the
+eval tolerance doctrine (the band from the win-probability delta).
+
+### Infrastructure
+Everything reuses the stage-6 stack: the pool schema, the vectorized
+tb_step + reinforce-best margin, the per-family gate table, the
+checklist-law pass floor. The differential head (D1/D2) attaches after
+T1. Puzzle sources download to ~/chess-lab/puzzles/.

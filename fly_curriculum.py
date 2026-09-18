@@ -730,7 +730,17 @@ def gen_stage(rng, stage, batch, piece=None):
             b, tgt = gen_mate1(rng)
             if b is None:
                 continue
-            spec = {"target_mv": tgt, "cls": 2}
+            # operator tolerance law: KQvK positions usually have SEVERAL
+            # legal mates (145/200 of the held battery) — accept ALL of
+            # them; a mate available is the one "clearly best move" class
+            mates = set()
+            for m in b.legal_moves:
+                b.push(m)
+                if b.is_checkmate():
+                    mates.add(m.uci())
+                b.pop()
+            spec = {"target_mv": tgt, "cls": 2,
+                    "target_set": mates or {tgt.uci()}}
         out.append((b, spec))
     return out
 

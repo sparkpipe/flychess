@@ -416,7 +416,8 @@ def gen_stage(rng, stage, batch, piece=None):
     """Yield list of (canonical_board, spec): leg_sq, target_mv, cls."""
     if stage in (2, 3) and isinstance(piece, str):
         piece = {"ep": chess.PAWN, "promo": chess.PAWN,
-                 "castle": chess.KING}[piece]
+                 "castle": chess.KING}.get(
+                    piece, getattr(chess, piece.upper()))
     out = []
     while len(out) < batch:
         spec = {}

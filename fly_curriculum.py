@@ -416,8 +416,15 @@ def gen_stage(rng, stage, batch, piece=None):
     """Yield list of (canonical_board, spec): leg_sq, target_mv, cls."""
     if isinstance(piece, str):
         piece = {"ep": chess.PAWN, "promo": chess.PAWN,
-                 "castle": chess.KING}.get(piece) \
-            or getattr(chess, piece.upper())
+                 "castle": chess.KING}.get(piece)
+        if piece is None:
+            # movement pieces resolve to enums; unknown strings (the
+            # stage-4 mode names their_king/pin/fork/discovered) pass
+            # through to the mode switch below
+            try:
+                piece = getattr(chess, piece.upper())
+            except AttributeError:
+                pass
     out = []
     while len(out) < batch:
         spec = {}

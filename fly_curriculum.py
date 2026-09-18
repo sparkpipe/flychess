@@ -1570,7 +1570,12 @@ def milestone_stage5(model, opt):
                         blocked = (f"s{st}:{pname(p2)}", pr, fails)
                 parts.append(f"s{st}:{pname(p2)}={round(pr, 3)}")
         for m2 in S4_MODES:
-            pr, fails = eval_ce(model, m2, n=64)
+            if m2 in ("their_king", "pin"):
+                erng = random.Random(8000 + _phash(m2) % 7919)
+                ebs = gen_stage(erng, 4, 64, piece=m2)
+                pr, fails = eval_piece_boards(model, ebs)
+            else:
+                pr, fails = eval_ce(model, m2, n=64)
             steps = 300
             for rnd in range(3):
                 if pr >= 0.98:
@@ -1578,7 +1583,12 @@ def milestone_stage5(model, opt):
                 train_stage(model, opt, 4, steps,
                             random.Random(9700 + _phash(m2) + rnd),
                             piece=m2)
-                pr, fails = eval_ce(model, m2, n=64)
+                if m2 in ("their_king", "pin"):
+                    erng = random.Random(8000 + _phash(m2) % 7919)
+                    ebs = gen_stage(erng, 4, 64, piece=m2)
+                    pr, fails = eval_piece_boards(model, ebs)
+                else:
+                    pr, fails = eval_ce(model, m2, n=64)
                 steps *= 2
             if pr < 0.98:
                 if pr >= 0.975:
@@ -1587,7 +1597,23 @@ def milestone_stage5(model, opt):
                 else:
                     blocked = (f"s4:{m2}", pr, fails)
             parts.append(f"s4:{m2}={round(pr, 3)}")
+        # the prior repairs pull weights away from the new concept —
+        # give mate1 its own repair pass BEFORE the final table
         pr5, _ = eval_held(n=64)
+        steps = 300
+        for rnd in range(3):
+            if pr5 >= 0.98:
+                break
+            train_stage(model, opt, 5, steps,
+                        random.Random(9800 + _phash("mate1") + rnd))
+            pr5, _ = eval_held(n=64)
+            steps *= 2
+        if pr5 < 0.98:
+            if pr5 >= 0.975:
+                print(f"  MARGINAL s5:mate1 accepted at "
+                      f"{pr5:.3f}", flush=True)
+            else:
+                blocked = (f"s5:mate1", pr5, [])
         parts.append(f"s5:mate1={round(pr5, 3)}")
         print("S5 REGRESSION-SWEEP " + " ".join(parts), flush=True)
         if blocked:

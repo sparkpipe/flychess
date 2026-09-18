@@ -18,7 +18,7 @@ DEV = cur.DEV
 STATE = os.environ.get("ISTATE", _LAB + "/fly_imagines_current.pt")
 PLANES = 12
 INDIM = (PLANES + 1) * 64 + 64 + 128      # planes + query + reach_t + move
-IORDER = ["I1", "I2", "I3"]
+IORDER = ["I1", "I2", "I3", "I4"]
 PTY = {"rook": chess.ROOK, "bishop": chess.BISHOP, "queen": chess.QUEEN,
        "knight": chess.KNIGHT, "pawn": chess.PAWN, "king": chess.KING}
 
@@ -150,6 +150,8 @@ def loss_fn(pred_p, pred_r, tgt_p, tgt_r):
 
 
 def train_step(model, opt, rng, lesson):
+    if lesson == "I4":
+        lesson = "I3"          # depth-4 gate trains on the chain data
     cap = None if lesson == "I1" else (True if lesson == "I2" else None)
     tr = sample_transition(rng, capture=cap)
     if tr is None:
@@ -171,6 +173,8 @@ def train_step(model, opt, rng, lesson):
 
 
 def eval_battery(model, lesson, n=192, seed=6200):
+    if lesson == "I4":
+        return depth4_battery(model, random.Random(seed + 44), n=96)
     rng = random.Random(seed + cur._phash(lesson) % 99991)
     paccs, raccs_nz, raccs_full, raccs_sign = [], [], [], []
     for _ in range(n):
@@ -233,6 +237,62 @@ def depth2_reach_acc(model, rng, n=64, seed=7300):
     return float(np.mean(accs)) if accs else 0.0
 
 
+def depth4_battery(model, rng, n=96):
+    """I4: free-running depth-4 rollout of the moved piece — the 8-ply
+    lookahead debug layer (operator: no 0.98 floor here). Each step feeds
+    PREDICTED planes + PREDICTED reach; the end-state reach is compared
+    to the true reach after 4 moves."""
+    accs_p, accs_nz, accs_full, accs_sign = [], [], [], []
+    for _ in range(n):
+        tr = sample_transition(rng, capture=True)
+        if tr is None:
+            continue
+        b, mv1, qs = tr
+        x, p1, r1 = transition_tensors(b, mv1, qs)
+        with torch.no_grad():
+            pp1, pr1 = model(torch.from_numpy(x[None]).to(DEV))
+        cur_b = b.copy()
+        cur_b.push(mv1)
+        p_prev = pp1[0].cpu().numpy().reshape(PLANES + 1, 64)
+        r_prev = pr1[0].cpu().numpy()
+        sq = mv1.to_square
+        r_t_last = r_p_last = None
+        p_ok = []
+        for _d in range(2, 5):
+            mvs = [m for m in cur_b.legal_moves
+                   if m.from_square == sq and not cur_b.is_capture(m)]
+            if not mvs:
+                break
+            mv = rng.choice(mvs)
+            x2 = np.concatenate([
+                p_prev.reshape(-1), r_prev,
+                np.eye(64, dtype=np.float32)[mv.from_square],
+                np.eye(64, dtype=np.float32)[mv.to_square]])
+            cur_b.push(mv)
+            r_t = cur.reach_map(cur_b, mv.to_square)
+            with torch.no_grad():
+                pp, pr = model(torch.from_numpy(x2[None]).to(DEV))
+            p_prev = pp[0].cpu().numpy().reshape(PLANES + 1, 64)
+            r_prev = pr[0].cpu().numpy()
+            sq = mv.to_square
+            p_ok.append(float((np.argmax(p_prev, axis=0)
+                               == np.argmax(p1, axis=0)).mean()))
+            r_t_last, r_p_last = r_t, r_prev
+        if r_t_last is None:
+            continue
+        nz = np.abs(r_t_last) > 1e-6
+        if not nz.any():
+            continue
+        ok = np.abs(r_p_last - r_t_last) < 0.25
+        accs_p.append(float(np.mean(p_ok)) if p_ok else 0.0)
+        accs_nz.append(float(ok[nz].mean()))
+        accs_full.append(float(ok.mean()))
+        accs_sign.append(float((np.sign(r_p_last)
+                                == np.sign(r_t_last))[nz].mean()))
+    mean = lambda a: float(np.mean(a)) if a else 0.0
+    return mean(accs_p), mean(accs_full), mean(accs_nz), mean(accs_sign)
+
+
 def main():
     torch.manual_seed(0)
     model = ImagineFly().to(DEV)
@@ -254,7 +314,7 @@ def main():
             train_step(model, opt, rng, lesson)
             if prev and step % 200 == 0:
                 for p_ in prev:
-                    _, _, _, rnz_p = fi.eval_battery(model, p_, n=64)
+                    _, _, _, rnz_p = eval_battery(model, p_, n=64)
                     I_LAST_ACC[p_] = rnz_p
             if prev and rng.random() < 0.3:
                 _wl = [max(0.02, 0.98 - I_LAST_ACC.get(p, 0.9))
@@ -268,10 +328,12 @@ def main():
                               "reach_full": round(rfull, 4),
                               "reach_nz": round(rnz, 4),
                               "reach_sign": round(rsign, 4)}), flush=True)
-            if pacc >= 0.999 and rnz >= 0.98:
+            _p_gate = 0.90 if lesson == "I4" else 0.98
+            _m_gate = 0.85 if lesson == "I4" else 0.975
+            if pacc >= 0.999 and rnz >= _p_gate:
                 print(f"I MILESTONE {lesson} PASS at step {step} "
                       f"(planes={pacc:.3f} reach_nz={rnz:.3f})", flush=True)
-            elif pacc >= 0.999 and rnz >= 0.975:
+            elif pacc >= 0.999 and rnz >= _m_gate:
                 print(f"I MILESTONE {lesson} PASS-MARGINAL at step {step} "
                       f"- accepted at floor, watched", flush=True)
                 torch.save(model.state_dict(), STATE)
@@ -309,6 +371,11 @@ def main():
                     break
                 print(f"I {lesson} EXHAUSTED (best {best:.3f})", flush=True)
                 torch.save(model.state_dict(), STATE)
+                if lesson == "I4":
+                    print("I4-DEBUG-CEILING — proceeding flagged "
+                          "(the lookahead debug layer, no hard floor)",
+                          flush=True)
+                    break
                 sys.exit(1)
     torch.save(model.state_dict(), STATE)
     d2 = depth2_reach_acc(model, random.Random(99))

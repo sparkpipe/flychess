@@ -31,6 +31,10 @@ CKPT_EVERY = 50            # batches per checkpoint part
 
 
 class _LocalCacheShim:
+    enabled = False
+    def get(self, paths, progress=False):
+        return {}
+
     def __init__(self, cf):
         self.cf = cf
     def download_as(self, requests, progress=False):

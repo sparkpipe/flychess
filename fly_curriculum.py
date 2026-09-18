@@ -2074,16 +2074,19 @@ def build_tb_batch(rng, rows, batch):
         mvs = list(b.legal_moves)
         ch = e.get("children", {})
         tv = graded_targets(e, b)
-        sv, vv, best = [], [], None
+        # ONE move set: ALL legal moves get the rich score; the graded
+        # values are a masked subset. (The old graded-subset scoring made
+        # the CE softmax blind to ungraded moves and misaligned shapes.)
+        sv, vv, vm, best = [], [], [], None
         p2 = {(pm.from_square, pm.to_square) for pm in b.pseudo_legal_moves}
         mfs, pss, ps2s, thrs, pci = [], [], [], [], []
-        for mv in mvs:
+        for k, mv in enumerate(mvs):
             u = mv.uci()
-            if u in tv:
-                sv.append(mv.from_square * 64 + mv.to_square)
-                vv.append(tv[u])
+            sv.append(mv.from_square * 64 + mv.to_square)
+            vv.append(tv.get(u, 0.0))
+            vm.append(u in tv)
             if u == e["best"]:
-                best = len(sv) - 1
+                best = k
             # the SAME rich move data the movement stages score with
             mfs.append(flyfeat_cb.move_feats(b, mv))
             pss.append(1.0 if (b.attacks_mask(mv.from_square)
@@ -2101,7 +2104,8 @@ def build_tb_batch(rng, rows, batch):
                      np.array(thrs, np.float32),
                      np.array(pci, np.int64)))
         slots.append((np.array(sv, dtype=np.int64),
-                      np.array(vv, dtype=np.float32)))
+                      np.array(vv, dtype=np.float32),
+                      np.array(vm, dtype=bool)))
         tgts.append(best if best is not None else -1)
     cl = torch.from_numpy(clb).to(DEV)
     return fvb, slots, tgts, cl, rich
@@ -2113,7 +2117,7 @@ def tb_step(model, opt, rows, rng):
     # THE canonical scorer (forward()) — the operator caught stage 6
     # scoring with theta*act alone, dropping ~90% of the discriminative
     # data the movement stages use; single source of truth from here on.
-    M = max(len(sv) for sv, _ in slots)
+    M = max(len(sv) for sv, _, _ in slots)
     F = rich[0][0].shape[1] if rich else 0
     slotb = np.zeros((Bn, M), dtype=np.int64)
     pcrowb = np.zeros((Bn, M), dtype=np.int64)
@@ -2122,7 +2126,8 @@ def tb_step(model, opt, rows, rng):
     pseudob = np.zeros((Bn, M), dtype=np.float32)
     threatb = np.zeros((Bn, M), dtype=np.float32)
     pseudo2b = np.zeros((Bn, M), dtype=np.float32)
-    for i, (sv, vv), (mfs, pss, ps2s, thrs, pci) in zip(
+    vmask = np.zeros((Bn, M), dtype=bool)
+    for i, (sv, vv, vm), (mfs, pss, ps2s, thrs, pci) in zip(
             range(Bn), slots, rich):
         L = len(sv)
         slotb[i, :L] = sv
@@ -2132,15 +2137,15 @@ def tb_step(model, opt, rows, rng):
         pseudob[i, :L] = pss
         threatb[i, :L] = thrs
         pseudo2b[i, :L] = ps2s
+        vmask[i, :L] = vm
     T, logp, T_all, cls = forward(model, fvb, slotb, pcrowb, mfb,
                                   maskb, pseudob, threatb, pseudo2b)
-    msk = torch.from_numpy(maskb).to(DEV)
     tv = torch.zeros((Bn, M), device=DEV)
-    for i, (sv, vv) in enumerate(slots):
+    for i, (sv, vv, vm) in enumerate(slots):
         tv[i, :len(vv)] = torch.from_numpy(vv).to(DEV)
     hub = torch.nn.functional.huber_loss(T, tv, delta=0.5,
                                          reduction="none")
-    loss_val = hub[msk].mean()
+    loss_val = hub[torch.from_numpy(vmask).to(DEV)].mean()
     tgt = torch.from_numpy(np.array(tgts, dtype=np.int64)).to(DEV)
     has = tgt >= 0
     loss_m = torch.nn.functional.cross_entropy(

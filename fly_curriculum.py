@@ -905,6 +905,48 @@ def forward(model, fvb, slotb, pcrowb, mfb, maskb, pseudob=None,
 HARD_SLOT_W = {}                       # (from,to) -> weight boost
 
 
+def make_score_ctx(model):
+    """Detached per-model constants for the scalar readout. ONE copy —
+    the four hand-rolled scorers this replaces had drifted term sets
+    (binary vs capped threat, missing pseudo2)."""
+    return {
+        "geo": model.geo_w(model.slot_geo).squeeze(-1)
+               .detach().cpu().numpy(),
+        "wmv": model.theta_mv.detach().cpu().numpy(),
+        "wp": float(model.w_pseudo.detach()),
+        "wp2": float(model.w_pseudo2.detach()),
+        "bs": getattr(model, "binding_scale", 0.0),
+        "wt": float(model.w_threat.detach()),
+    }
+
+
+def score_terms(ctx, theta_val, act_val, geo_val, mf, wpc,
+                ps, ps2, thr):
+    """The canonical scalar move score: the same terms as forward(),
+    one legal order. Every scalar-path eval scores through THIS."""
+    return (theta_val * act_val + geo_val
+            + float(mf @ (ctx["wmv"] + wpc))
+            + ctx["wp"] * ps + ctx["bs"] * ctx["wp2"] * ps2
+            + ctx["wt"] * thr)
+
+
+def repair_until(eval_fn, train_fn, rng_fn, bar=0.98, rounds=3,
+                 steps0=300):
+    """The escalation-repair loop (300->600->1200 ...), single-sourced:
+    it appeared copied six times across the stage-4/5 sweeps. Returns
+    (score, failures, rounds_used)."""
+    pr, fails = eval_fn()
+    steps = steps0
+    for rnd in range(rounds):
+        if pr >= bar:
+            break
+        train_fn(steps, rng_fn(rnd))
+        pr, fails = eval_fn()
+        steps *= 2
+    return pr, fails, rounds
+
+
+
 def train_stage(model, opt, stage, steps, rng, piece=None):
     t0 = time.time()
     for step in range(1, steps + 1):
@@ -1356,19 +1398,16 @@ def eval_ce(model, mode, n=96, seed=7000, stage=4):
         if not mvs or tgt not in mvs:
             continue
         act = a[model.readout_idx.cpu().numpy(), i].detach().cpu().numpy()
-        pseudo = []
         scores = []
-        wmv = model.theta_mv.detach().cpu().numpy()
-        wp = float(model.w_pseudo.detach())
-        wp2 = float(model.w_pseudo2.detach())
-        wt = float(model.w_threat.detach())
+        ctx = make_score_ctx(model)
+        wmv = ctx["wmv"]
         p2 = {(pm.from_square, pm.to_square) for pm in b.pseudo_legal_moves}
         for mv in mvs:
             slot = mv.from_square * 64 + mv.to_square
             mf = flyfeat_cb.move_feats(b, mv)
             pc = b.piece_at(mv.from_square)
             wpc = model.theta_mv_pc[_PC_IDX[pc.piece_type]].detach() \
-                .cpu().numpy() if pc else None
+                .cpu().numpy() if pc else np.zeros_like(wmv)
             ps = 1.0 if (pc and b.attacks_mask(mv.from_square)
                          & chess.BB_SQUARES[mv.to_square]) else 0.0
             ps2 = 1.0 if (mv.from_square, mv.to_square) in p2 else 0.0
@@ -1377,10 +1416,9 @@ def eval_ce(model, mode, n=96, seed=7000, stage=4):
                           & b.occupied_co[b.turn]).count("1"), 4) / 4.0
             b.pop()
             ps2 = 1.0 if (mv.from_square, mv.to_square) in p2 else 0.0
-            scores.append(float(model.theta[slot].detach()) * act[slot]
-                          + geo[slot] + float(mf @ (wmv + wpc)) + wp * ps
-                          + getattr(model, "binding_scale", 0.0) * wp2 * ps2
-                          + wt * thr)
+            scores.append(score_terms(ctx, float(model.theta[slot].detach()),
+                                      act[slot], geo[slot], mf, wpc,
+                                      ps, ps2, thr))
         pick = mvs[int(np.argmax(scores))]
         tset = spec.get("target_set") or {tgt.uci()}
         tot += 1

@@ -4,13 +4,15 @@
 - checkpointed edge parts under h01_edges/
 """
 import os, sys, json, time
+# must precede ANY cloudvolume/cloudfiles import: cloudfiles.secrets reads
+# this env once at import; cloud-volume's internal CloudFiles instances
+# (sharding.py) otherwise lock ~800 zero-byte files/sec onto the disk
+os.environ.setdefault("CLOUD_FILES_LOCK_DIR", "/dev/shm/cloudfiles-locks")
+os.makedirs("/dev/shm/cloudfiles-locks", exist_ok=True)
 import numpy as np
 sys.path.insert(0, "/home/spec/chess-lab")
 from cloudvolume.datasource.precomputed import create_precomputed_annotation
 from cloudvolume.datasource.precomputed.sharding import ShardReader, ShardingSpecification
-import os as _os
-_os.environ.setdefault("CLOUD_FILES_LOCK_DIR", "/dev/shm/cloudfiles-locks")
-_os.makedirs("/dev/shm/cloudfiles-locks", exist_ok=True)
 from cloudfiles import CloudFiles
 
 ROOT = "/mnt/model-warm/human-h01-connectome/data/20210601/c3/synapses/precomputed"

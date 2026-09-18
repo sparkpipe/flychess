@@ -1376,8 +1376,10 @@ def eval_ce(model, mode, n=96, seed=7000, stage=4):
             thr = min(bin(b.attacks_mask(mv.to_square)
                           & b.occupied_co[b.turn]).count("1"), 4) / 4.0
             b.pop()
+            ps2 = 1.0 if (mv.from_square, mv.to_square) in p2 else 0.0
             scores.append(float(model.theta[slot].detach()) * act[slot]
                           + geo[slot] + float(mf @ (wmv + wpc)) + wp * ps
+                          + getattr(model, "binding_scale", 0.0) * wp2 * ps2
                           + wt * thr)
         pick = mvs[int(np.argmax(scores))]
         tset = spec.get("target_set") or {tgt.uci()}
@@ -2064,15 +2066,17 @@ def build_tb_batch(rng, rows, batch):
         except Exception:
             continue
     fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in buf])
+    rich = []
     slots = []
     tgts = []
     clb = np.array([CLS_MAP.get(e["cat"], 1) for _, e in buf], dtype=np.int64)
-    bests = []
     for b, e in buf:
         mvs = list(b.legal_moves)
         ch = e.get("children", {})
         tv = graded_targets(e, b)
         sv, vv, best = [], [], None
+        p2 = {(pm.from_square, pm.to_square) for pm in b.pseudo_legal_moves}
+        mfs, pss, ps2s, thrs, pci = [], [], [], [], []
         for mv in mvs:
             u = mv.uci()
             if u in tv:
@@ -2080,55 +2084,78 @@ def build_tb_batch(rng, rows, batch):
                 vv.append(tv[u])
             if u == e["best"]:
                 best = len(sv) - 1
+            # the SAME rich move data the movement stages score with
+            mfs.append(flyfeat_cb.move_feats(b, mv))
+            pss.append(1.0 if (b.attacks_mask(mv.from_square)
+                               & chess.BB_SQUARES[mv.to_square]) else 0.0)
+            ps2s.append(1.0 if (mv.from_square, mv.to_square) in p2 else 0.0)
+            pc = b.piece_at(mv.from_square)
+            pci.append(_PC_IDX[pc.piece_type] if pc else 0)
+            b.push(mv)
+            thrs.append(min(bin(b.attacks_mask(mv.to_square)
+                                & b.occupied_co[b.turn]).count("1"), 4) / 4.0)
+            b.pop()
+        rich.append((np.stack(mfs) if mfs else np.zeros((0, 0), np.float32),
+                     np.array(pss, np.float32),
+                     np.array(ps2s, np.float32),
+                     np.array(thrs, np.float32),
+                     np.array(pci, np.int64)))
         slots.append((np.array(sv, dtype=np.int64),
                       np.array(vv, dtype=np.float32)))
         tgts.append(best if best is not None else -1)
-        bests.append(1)
     cl = torch.from_numpy(clb).to(DEV)
-    return fvb, slots, tgts, cl
+    return fvb, slots, tgts, cl, rich
 
 
 def tb_step(model, opt, rows, rng):
-    fvb, slots, tgts, cl = build_tb_batch(rng, rows, B)
-    a = model.propagate(fvb)
-    Bn = a.shape[1]
-    cls = model.theta_cls.unsqueeze(0) * torch.tanh(a[model.cls_idx].T / 4.0)
-    loss_cls = torch.nn.functional.cross_entropy(cls, cl)
-    # VECTORIZED row scores: padded [B, M] gather in ONE fused op — the
-    # per-row loop with host->device tensor creation sync-stalled the GPU
-    # ~7x (500 steps in 10 min). Masked huber regression + one masked CE
-    # on the TB-best index (the operator's "reinforce the best move": pure
-    # regression left the argmax pinned at 0.47 for 50k steps).
+    fvb, slots, tgts, cl, rich = build_tb_batch(rng, rows, B)
+    Bn = fvb.shape[0]
+    # THE canonical scorer (forward()) — the operator caught stage 6
+    # scoring with theta*act alone, dropping ~90% of the discriminative
+    # data the movement stages use; single source of truth from here on.
     M = max(len(sv) for sv, _ in slots)
-    Sidx = np.zeros((len(slots), M), dtype=np.int64)
-    Vt = np.zeros((len(slots), M), dtype=np.float32)
-    Msk = np.zeros((len(slots), M), dtype=bool)
-    for i, (sv, vv) in enumerate(slots):
+    F = rich[0][0].shape[1] if rich else 0
+    slotb = np.zeros((Bn, M), dtype=np.int64)
+    pcrowb = np.zeros((Bn, M), dtype=np.int64)
+    mfb = np.zeros((Bn, M, F), dtype=np.float32)
+    maskb = np.zeros((Bn, M), dtype=bool)
+    pseudob = np.zeros((Bn, M), dtype=np.float32)
+    threatb = np.zeros((Bn, M), dtype=np.float32)
+    pseudo2b = np.zeros((Bn, M), dtype=np.float32)
+    for i, (sv, vv), (mfs, pss, ps2s, thrs, pci) in zip(
+            range(Bn), slots, rich):
         L = len(sv)
-        Sidx[i, :L] = sv
-        Vt[i, :L] = vv
-        Msk[i, :L] = True
-    S = torch.from_numpy(Sidx).to(DEV)
-    cols = torch.arange(Bn, device=DEV).unsqueeze(1)
-    T = model.theta[S] * a[model.readout_idx[S], cols]
-    T = T.masked_fill(torch.from_numpy(~Msk).to(DEV), 0.0)
-    tv = torch.from_numpy(Vt).to(DEV)
-    hub = torch.nn.functional.huber_loss(T, tv, delta=0.5, reduction="none")
-    loss_val = hub[torch.from_numpy(Msk).to(DEV)].mean()
+        slotb[i, :L] = sv
+        pcrowb[i, :L] = pci
+        mfb[i, :L] = mfs
+        maskb[i, :L] = True
+        pseudob[i, :L] = pss
+        threatb[i, :L] = thrs
+        pseudo2b[i, :L] = ps2s
+    T, logp, T_all, cls = forward(model, fvb, slotb, pcrowb, mfb,
+                                  maskb, pseudob, threatb, pseudo2b)
+    msk = torch.from_numpy(maskb).to(DEV)
+    tv = torch.zeros((Bn, M), device=DEV)
+    for i, (sv, vv) in enumerate(slots):
+        tv[i, :len(vv)] = torch.from_numpy(vv).to(DEV)
+    hub = torch.nn.functional.huber_loss(T, tv, delta=0.5,
+                                         reduction="none")
+    loss_val = hub[msk].mean()
     tgt = torch.from_numpy(np.array(tgts, dtype=np.int64)).to(DEV)
-    has_best = tgt >= 0
-    if has_best.any():
-        loss_m = torch.nn.functional.cross_entropy(
-            T[has_best], tgt[has_best],
-            ignore_index=-1)
-    else:
-        loss_m = torch.zeros((), device=DEV)
-    loss = loss_val * 2.0 + loss_cls + loss_m
+    has = tgt >= 0
+    loss_m = torch.nn.functional.cross_entropy(
+        logp[has], tgt[has], ignore_index=-1) if has.any() \
+        else torch.zeros((), device=DEV)
+    loss = loss_val * 2.0 + loss_cls_term(cls, cl) + loss_m
     opt.zero_grad()
     loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     opt.step()
     return float(loss.item())
+
+
+def loss_cls_term(cls, cl):
+    return torch.nn.functional.cross_entropy(cls, cl)
 
 
 def gate_tb(model, rows, rng):
@@ -2154,8 +2181,39 @@ def gate_tb(model, rows, rng):
             a = model.propagate(fv[None, :])
             s = torch.tensor([m.from_square * 64 + m.to_square
                               for m in mvs], device=DEV)
-            T = model.theta[s] * a[model.readout_idx[s], 0]
-            pick = mvs[int(torch.argmax(T))]
+            # the gate MIRRORS the canonical forward() scorer — same
+            # single source of truth as the training step
+            Mv = len(mvs)
+            slotb = np.array([m.from_square * 64 + m.to_square
+                              for m in mvs], dtype=np.int64)[None, :]
+            pcrowb = np.array(
+                [_PC_IDX[b.piece_at(m.from_square).piece_type]
+                 if b.piece_at(m.from_square) else 0 for m in mvs],
+                dtype=np.int64)[None, :]
+            mfb = np.stack([flyfeat_cb.move_feats(b, mv)
+                            for mv in mvs])[None, :, :]
+            maskb = np.ones((1, Mv), dtype=bool)
+            p2 = {(pm.from_square, pm.to_square)
+                  for pm in b.pseudo_legal_moves}
+            pseudob = np.array(
+                [[1.0 if (b.attacks_mask(m.from_square)
+                          & chess.BB_SQUARES[m.to_square]) else 0.0
+                  for m in mvs]], dtype=np.float32)
+            pseudo2b = np.array(
+                [[1.0 if (m.from_square, m.to_square) in p2 else 0.0
+                  for m in mvs]], dtype=np.float32)
+            thrb = []
+            for mv in mvs:
+                b.push(mv)
+                thrb.append(min(bin(b.attacks_mask(mv.to_square)
+                                    & b.occupied_co[b.turn]).count("1"),
+                                4) / 4.0)
+                b.pop()
+            threatb = np.array([thrb], dtype=np.float32)
+            T, logp, T_all, clsg = forward(model, fv[None, :], slotb,
+                                           pcrowb, mfb, maskb,
+                                           pseudob, threatb, pseudo2b)
+            pick = mvs[int(torch.argmax(T[0]))]
             # optimal set: moves whose child category preserves the outcome
             ch = e.get("children", {})
             opt = {"win": "loss", "cursed_win": "loss", "draw": "draw",

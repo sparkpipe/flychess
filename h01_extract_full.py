@@ -8,6 +8,9 @@ import numpy as np
 sys.path.insert(0, "/home/spec/chess-lab")
 from cloudvolume.datasource.precomputed import create_precomputed_annotation
 from cloudvolume.datasource.precomputed.sharding import ShardReader, ShardingSpecification
+import os as _os
+_os.environ.setdefault("CLOUD_FILES_LOCK_DIR", "/dev/shm/cloudfiles-locks")
+_os.makedirs("/dev/shm/cloudfiles-locks", exist_ok=True)
 from cloudfiles import CloudFiles
 
 ROOT = "/mnt/model-warm/human-h01-connectome/data/20210601/c3/synapses/precomputed"

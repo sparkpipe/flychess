@@ -1935,16 +1935,19 @@ def hold_eval_fns():
     return HOLD_EVALS
 
 
-def maintain_holdouts(model, opt, rng, focus_below_floor=True):
+def maintain_holdouts(model, opt, rng, focus_below_floor=True,
+                      focus_fn=None):
     """THE maintenance law (one implementation, used by every stage):
     every registered holdout below 0.98 gets repaired; while the focus is
-    below its floor, ~20% of the repair turns stay on the focus."""
+    below its floor, ~20% of the repair turns stay on the focus.
+    focus_fn = the CALLER's focus trainer (stage 6 trains via tb_step on
+    pool rows — train_stage(stage=6) has no generator and crashes)."""
     fns = hold_eval_fns()
     held = {}
     for name, (ev, rep) in fns.items():
         def _il(stp, sd):
-            if focus_below_floor:
-                focus_turns(model, opt, 6, stp, sd)
+            if focus_below_floor and focus_fn is not None:
+                focus_fn(stp, sd)
         pr, _, _ = repair_until(
             lambda: ev(model),
             lambda stp, sd: rep(model, opt, stp, sd),
@@ -2032,7 +2035,13 @@ def main_tb(steps):
         # the maintenance law (same as every stage): hold prior concepts
         # >= 0.98 while the focus trains — the missing piece that eroded
         # mate1 1.00 -> 0.825 during pure-TB training
-        held = maintain_holdouts(model, opt, rng)
+        def _tb_focus(stp, sd):
+            frng = random.Random(sd)
+            for _ in range(max(1, stp // 4)):
+                tb_step(model, opt, rows, frng)
+        held = maintain_holdouts(model, opt, rng,
+                                 focus_below_floor=True,
+                                 focus_fn=_tb_focus)
         worst_held = min(held.values()) if held else 1.0
         torch.save(model.state_dict(), STATE + ".tmp")
         os.replace(STATE + ".tmp", STATE)

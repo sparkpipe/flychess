@@ -2086,6 +2086,7 @@ def tb_step(model, opt, rows, rng):
     # per-move value regression on raw slot logits
     losses = []
     ce_terms = []
+    marg = []
     for i, (sv, vv) in enumerate(slots):
         if len(sv) < 2:
             continue
@@ -2094,8 +2095,18 @@ def tb_step(model, opt, rows, rng):
         Trow = model.theta[s] * a[model.readout_idx[s], i] \
             + torch.zeros(len(s), device=DEV)
         losses.append(torch.nn.functional.huber_loss(Trow, t, delta=0.5))
+        # operator Dvoretsky spec: REINFORCE the best move (the graded
+        # regression alone fits values but leaves the argmax wrong on
+        # near-ties — measured: gate pinned 0.47 for 50k steps while the
+        # loss fell to 0.16; CE on the TB-best index optimizes the gate
+        # metric directly)
+        if tgts[i] >= 0:
+            marg.append(torch.nn.functional.cross_entropy(
+                Trow.unsqueeze(0),
+                torch.tensor([tgts[i]], device=DEV)))
     loss_val = torch.stack(losses).mean() if losses else torch.zeros((), device=DEV)
-    loss = loss_val * 2.0 + loss_cls
+    loss_m = torch.stack(marg).mean() if marg else torch.zeros((), device=DEV)
+    loss = loss_val * 2.0 + loss_cls + loss_m
     opt.zero_grad()
     loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

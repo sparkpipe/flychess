@@ -209,3 +209,29 @@ shard 01 deterministically; wedged procs go D-state, TERM-immune, linger).
 One lingering D-state proc is tolerated (0.4% CPU, pgrep-visible so the
 driver's H01 rule reads it as alive). Resume extraction after the sysadmin
 clears the object; enumeration restarts from shard 00 (idempotent parts).
+
+## Eval tolerance doctrine (operator directive, 2026-09-18)
+
+The operator: "it could be that the move picked is not in the approved
+answers, but it is not wrong... we need a certain level of tolerance for
+the not quite exact match unless there is a clearly best move, eg.
+checkmate."
+
+1. Stages 1-4 batteries = rule-derived labels (legality, discovery, fork —
+   chess-defined concept classes; the two answer-key bugs were this class).
+   No SF there.
+2. From stage 5 onward (dense boards, mate-in-2, differential head, opening
+   module): the answer key = STOCKFISH SCORES FOR ALL LEGAL MOVES (fixed
+   depth/nodes for determinism; /usr/games/stockfish via chess.engine —
+   the rig's hookup is the base). Grading:
+   - Clearly-best exception: a forced win defines the accepted CLASS (all
+     mating moves, never one labeled mate — 145/200 of the mate1 held
+     battery had 2+ legal mates; fixed same day: target_set = all mates).
+   - Tolerance band: a pick is accepted if SF(pick) >= SF(best) - band.
+     Band proposal for the operator to calibrate: a WIN-PROBABILITY delta
+     (ties into the 0.4W/0.45B draw scoring) rather than raw centipawns;
+     chessfly's MAE 0.081 gives the "not quite exact" scale.
+   - A pick outside the labeled answers is NOT an error unless it crosses
+     the band or throws away a forced win.
+3. The SF-scored all-moves harness is built with the D1/D2 differential
+   head (it is also the D3 calibration substrate).

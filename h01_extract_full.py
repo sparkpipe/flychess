@@ -35,12 +35,13 @@ class _LocalCacheShim:
     def get(self, paths, progress=False):
         return {}
 
-    def __init__(self, cf):
+    def __init__(self, cf, root=None):
         self.cf = cf
+        self.root = root or ROOT
     def download_as(self, requests, progress=False):
         out = {}
         for r in requests:
-            p = os.path.join(ROOT, r["path"])
+            p = os.path.join(self.root, r["path"])
             with open(p, "rb") as f:
                 f.seek(r["start"])
                 out[(r["path"], r["start"], r["end"])] = f.read(r["end"] - r["start"])
@@ -89,7 +90,8 @@ def main():
         rspec_d = ShardingSpecification.from_dict(rspec["sharding"])
         rc = cloudfiles.CloudFiles("file://" + ROOT + "/" + rid)
         rel_readers[rid] = ShardReader(
-            "file://" + ROOT + "/" + rid, _LocalCacheShim(rc), rspec_d)
+            "file://" + ROOT + "/" + rid,
+            _LocalCacheShim(rc, ROOT + "/" + rid), rspec_d)
     pre_reader = rel_readers["pre_synaptic_cell"]
     post_reader = rel_readers["post_synaptic_cell"]
 

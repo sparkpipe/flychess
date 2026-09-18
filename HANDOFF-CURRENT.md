@@ -125,3 +125,31 @@ merge via git locally + push, the PR auto-closes).
 - The design: DESIGN.md (repo + node). The prior art: mlabonne/chessfly (HF).
 - The H01: /mnt/model-warm/human-h01-connectome (910G, verified); the ids
   checkpointed at h01_ids.npy; the extraction h01_extract_full.py.
+
+## The 8-hour unmonitored window (2026-09-18, operator: "stop for the day")
+
+The driver automation is DELETED (operator ruling — training runs
+unmonitored ~8h). State at window start:
+- **Stage 5**: mate1 gate PASSED (1.00 on 200 held, all-mates key); the
+  chain is in `S5 SWEEP CYCLE 1` under the operator's cycle protocol
+  (repairs interleave 20% mate1 turns ONLY while held<0.98 → hold new set
+  ≥0.98 → re-table → up to 3 cycles → `S5 NO-CONVERGENCE` + analysis dump
+  and STOP). Check v3_s5.out first thing: STAGE 5 ALL MILESTONES PASSED /
+  NO-CONVERGENCE / still mid-cycle. The branch stage5-mates merges to
+  master via git when the PASS lands.
+- **H01 extraction**: Ceph object fault FIXED (operator/sysadmin cleared
+  by_id/01.shard — verified readable); extraction relaunched and healthy.
+  NOTE: ~/.cloudfiles/locks accumulates stale lock files over long runs
+  (4.1M files once) — clear it after the extraction completes. The edge
+  table (relationship decode) remains the queued build after the raw
+  extraction.
+- **Training audit** (operator-directed, done 2026-09-18): stages 1-3
+  labels rule-derived from chess.legal_moves (clean); stage 4 concept
+  labels rule-verified at generation (kingless boards — SF inapplicable);
+  stage 5 200/200 SF-validated (label is mate, SF agrees mate-in-1, SF
+  best is a mate). The open training-side improvement: CE targets one
+  labeled mate where several are correct — multi-target CE is the next
+  fix when the SF-scored harness lands with D1/D2.
+- **Disk**: root LV extended 100G→216G (128G unallocated absorbed; 36%
+  used). The drafters LV (688G, /srv/drafters, retired dflash artifacts
+  27G) awaits the operator's reclaim ruling.

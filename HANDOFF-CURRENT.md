@@ -153,3 +153,19 @@ unmonitored ~8h). State at window start:
 - **Disk**: root LV extended 100G→216G (128G unallocated absorbed; 36%
   used). The drafters LV (688G, /srv/drafters, retired dflash artifacts
   27G) awaits the operator's reclaim ruling.
+
+## STAGE 6 PASSED — the v3 curriculum is COMPLETE (2026-09-18)
+
+`STAGE 6 PASSED — tablebase endings internalized`: gate 0.99 at step 5500
+(floor 0.98) after the reinforce-best fix took it off the 0.47 pin
+(0.5875@500 → 0.8625@4000 → 0.99@5500). Graduated checkpoint archived at
+/mnt/model-warm/flychess-archive/graduated-arms/fly_cb_v3_s6_graduated.pt;
+live fly_cb_v3_s6.pt on the node. THE FULL LADDER: 6 lessons + stages
+2/3/4 + stage 5 (KQvK mate-in-1, all-mates key) + stage 6 (tablebase
+endings, graded state-change targets, zugzwang-correct). The next
+builds, in order: the mates ladder via imagination depth (KRK technique,
+mate-in-2, KBNvK W-maneuver), the differential head D1/D2 (+ the
+SF-scored all-moves harness and multi-target CE), the Lichess CC0 fetch,
+the opening module (gambit spec, asymmetric scoring), H01 experiments
+after the extraction completes (relaunch recipe proven: tmpfs locks +
+janitor; resume idempotent from 46 parts).

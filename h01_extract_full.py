@@ -71,26 +71,41 @@ def main():
     ids = enumerate_ids(cf, reader)
     total = len(ids)
     print(json.dumps({"total_ids": total}), flush=True)
-    ann = create_precomputed_annotation(
-        "precomputed://" + ROOT,
-        {"bounded": True, "fill_missing": True, "progress": False,
-         "parallel": 1, "mip": 0,
-         "cache": _LocalCacheShim(cf)})
+    # THE RELATIONSHIP DECODE (cracked 2026-09-18): the info file's
+    # "relationships" block declares EACH relationship's own sharding spec
+    # (pre: shard_bits 4 / minishard 13; post: shard_bits 4 / minishard 12)
+    # — NOT the by_id spec (5/13). The old code used the by_id parameters,
+    # so every lookup missed. Partners are single uint64 segment ids read
+    # per-relationship via ShardReader.get_data.
+    info = json.load(open("/home/spec/chess-lab/h01_synapses_info.json"))
+    rel_readers = {}
+    for rspec in info["relationships"]:
+        rid = rspec["id"]
+        rspec_d = ShardingSpecification.from_dict(rspec["sharding"])
+        rc = cloudfiles.CloudFiles("file://" + ROOT + "/" + rid)
+        rel_readers[rid] = ShardReader(
+            "file://" + ROOT + "/" + rid, _LocalCacheShim(rc), rspec_d)
+    pre_reader = rel_readers["pre_synaptic_cell"]
+    post_reader = rel_readers["post_synaptic_cell"]
+
+    def partner(reader, sid):
+        v = reader.get_data(int(sid))
+        return int(np.frombuffer(v, dtype=np.uint64)[0]) if v else None
     os.makedirs(OUT, exist_ok=True)
     part = 0
     pre_l, post_l, typ_l = [], [], []
     t0 = time.time()
     for i in range(0, total, BATCH):
         batch = ids[i:i + BATCH]
-        anns = ann.get_by_id(list(batch))
-        for a in anns:
-            pre = getattr(a, "pre_synaptic_cell", None)
-            post = getattr(a, "post_synaptic_cell", None)
+        for sid in batch:
+            sid = int(sid)
+            pre = partner(pre_reader, sid)
+            post = partner(post_reader, sid)
             if pre is None or post is None:
                 continue
-            pre_l.append(int(pre))
-            post_l.append(int(post))
-            typ_l.append(int(a.type))
+            pre_l.append(pre)
+            post_l.append(post)
+            typ_l.append(0)
         done = min(i + BATCH, total)
         if (i // BATCH) % 10 == 0:
             print(json.dumps({"ids_done": done, "edges": len(pre_l),

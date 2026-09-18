@@ -1521,6 +1521,13 @@ def milestone_stage5(model, opt):
         return eval_ce(model, None, n=n,
                        seed=7000 + _phash("mate1_held") % 9973, stage=5)
 
+    def _repair_interleave(train_call, steps, seed):
+        # operator interleaving law: fixing older datasets must retrain the
+        # newest concept with ~20% of the turns, or the fixups erode it
+        train_call(steps, seed)
+        train_stage(model, opt, 5, max(1, steps // 4),
+                    random.Random(seed + 77))
+
     print("=== S5 MILESTONE mate1 ===", flush=True)
     rng = random.Random(9000 + _phash("mate1") % 104729)
     prior = [(st, p) for st in (1, 2, 3) for p in PIECE_ORDER]
@@ -1556,10 +1563,11 @@ def milestone_stage5(model, opt):
                 for rnd in range(3):
                     if pr >= 0.98:
                         break
-                    train_stage(model, opt, st, steps,
-                                random.Random(9500 + st * 31
-                                              + _phash(p2) + rnd),
-                                piece=p2)
+                    _repair_interleave(
+                        lambda stp, sd, _st=st, _p=p2: train_stage(
+                            model, opt, _st, stp,
+                            random.Random(sd), piece=_p),
+                        steps, 9500 + st * 31 + _phash(p2) + rnd)
                     pr, fails = eval_piece(model, p2, n=64, stage=st)
                     steps *= 2
                 if pr < 0.98:
@@ -1580,9 +1588,10 @@ def milestone_stage5(model, opt):
             for rnd in range(3):
                 if pr >= 0.98:
                     break
-                train_stage(model, opt, 4, steps,
-                            random.Random(9700 + _phash(m2) + rnd),
-                            piece=m2)
+                _repair_interleave(
+                    lambda stp, sd, _m=m2: train_stage(
+                        model, opt, 4, stp, random.Random(sd), piece=_m),
+                    steps, 9700 + _phash(m2) + rnd)
                 if m2 in ("their_king", "pin"):
                     erng = random.Random(8000 + _phash(m2) % 7919)
                     ebs = gen_stage(erng, 4, 64, piece=m2)

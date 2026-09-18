@@ -183,3 +183,55 @@ killed mid-lesson; maintenance runs inside the loop. 7. pkill patterns run
 ALONE in their own ssh. 8. Patches: local canonical file → assert-guarded →
 smoke → ship. 9. PR flow: branch → test → PR → merge at stability.
 10. Verify training liveness with fresh tails, never stale reports.
+
+## Ops addendum — H01 extraction relaunch (2026-09-17, fix-as-found)
+
+The driver's H01 relaunch line must run the VENV python:
+`cd ~/chess-lab && H01_TARGET=12000000 nohup ~/chess-lab/.venv312/bin/python3 h01_extract_full.py > h01_extract.log 2>&1 < /dev/null &`
+— bare `python3` is system 3.14 (no cloud-volume wheel; instant ModuleNotFoundError).
+Probe liveness with `pgrep -f h01_extract_full` (a `h01_extract[.]py` pattern
+never matches `h01_extract_full.py` — false DOWNs). If a relaunch dies with
+`OSError Errno 28` (disk full on /), clear `~/.cache/pip ~/.cache/uv` first
+(kept ~1.4G on 2026-09-17; leave ~/.cache/huggingface — the champion lane's
+fetchers need it). The enumeration phase re-runs from shard 00 each relaunch
+(~1 min/shard, by_id shards ~72MB); edge parts in h01_edges/ are checkpointed
+and idempotent-skipped.
+
+### H01 extraction BLOCKED 2026-09-17 23:59 — Ceph object fault (escalated)
+
+`by_id/01.shard` (362,038,315 B) is UNREADABLE: fresh-process reads hang at
+any offset/leash (D-state folio_wait_bit_common, 100s+ leashes, all block
+sizes); peer objects read fine (00.shard incl. its 300MB tail, 02.shard,
+64KB reads). Signature = the folio_wait wedge class, but object-specific —
+suspect bad extent/OSD placement or stuck MDS cap on that object.
+DO NOT relaunch the extraction while this stands (the enumeration wedges at
+shard 01 deterministically; wedged procs go D-state, TERM-immune, linger).
+One lingering D-state proc is tolerated (0.4% CPU, pgrep-visible so the
+driver's H01 rule reads it as alive). Resume extraction after the sysadmin
+clears the object; enumeration restarts from shard 00 (idempotent parts).
+
+## Eval tolerance doctrine (operator directive, 2026-09-18)
+
+The operator: "it could be that the move picked is not in the approved
+answers, but it is not wrong... we need a certain level of tolerance for
+the not quite exact match unless there is a clearly best move, eg.
+checkmate."
+
+1. Stages 1-4 batteries = rule-derived labels (legality, discovery, fork —
+   chess-defined concept classes; the two answer-key bugs were this class).
+   No SF there.
+2. From stage 5 onward (dense boards, mate-in-2, differential head, opening
+   module): the answer key = STOCKFISH SCORES FOR ALL LEGAL MOVES (fixed
+   depth/nodes for determinism; /usr/games/stockfish via chess.engine —
+   the rig's hookup is the base). Grading:
+   - Clearly-best exception: a forced win defines the accepted CLASS (all
+     mating moves, never one labeled mate — 145/200 of the mate1 held
+     battery had 2+ legal mates; fixed same day: target_set = all mates).
+   - Tolerance band: a pick is accepted if SF(pick) >= SF(best) - band.
+     Band proposal for the operator to calibrate: a WIN-PROBABILITY delta
+     (ties into the 0.4W/0.45B draw scoring) rather than raw centipawns;
+     chessfly's MAE 0.081 gives the "not quite exact" scale.
+   - A pick outside the labeled answers is NOT an error unless it crosses
+     the band or throws away a forced win.
+3. The SF-scored all-moves harness is built with the D1/D2 differential
+   head (it is also the D3 calibration substrate).

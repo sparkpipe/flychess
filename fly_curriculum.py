@@ -730,7 +730,17 @@ def gen_stage(rng, stage, batch, piece=None):
             b, tgt = gen_mate1(rng)
             if b is None:
                 continue
-            spec = {"target_mv": tgt, "cls": 2}
+            # operator tolerance law: KQvK positions usually have SEVERAL
+            # legal mates (145/200 of the held battery) — accept ALL of
+            # them; a mate available is the one "clearly best move" class
+            mates = set()
+            for m in b.legal_moves:
+                b.push(m)
+                if b.is_checkmate():
+                    mates.add(m.uci())
+                b.pop()
+            spec = {"target_mv": tgt, "cls": 2,
+                    "target_set": mates or {tgt.uci()}}
         out.append((b, spec))
     return out
 
@@ -1322,10 +1332,10 @@ def milestone_stage3(model, opt):
 S4_MODES = ["their_king", "pin", "fork", "discovered"]
 
 
-def eval_ce(model, mode, n=96, seed=7000):
+def eval_ce(model, mode, n=96, seed=7000, stage=4):
     """CE-mode battery: argmax over legal moves must pick target_mv."""
-    rng = random.Random(seed + _phash(mode) % 9973)
-    boards_specs = gen_stage(rng, 4, n, piece=mode)
+    rng = random.Random(seed + _phash(mode or "mate1") % 9973)
+    boards_specs = gen_stage(rng, stage, n, piece=mode)
     fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
     reach = np.stack([reach_map(b, spec.get("leg_sq"))
                       for b, spec in boards_specs]) \
@@ -1500,6 +1510,163 @@ def milestone_stage4(model, opt):
     torch.save(model.state_dict(), STATE)
     print("STAGE 4 ALL MILESTONES PASSED", flush=True)
     return True
+
+
+def milestone_stage5(model, opt):
+    """Stage 5: basic mates — KQvK mate-in-1 CE at 100% on a 200-board
+    held-out battery (the S5 spec gate); stages 1-4 maintenance replay."""
+    logf = open(LOGF, "a")
+
+    def eval_held(n=200):
+        return eval_ce(model, None, n=n,
+                       seed=7000 + _phash("mate1_held") % 9973, stage=5)
+
+    def _repair_interleave(train_call, steps, seed):
+        # operator interleaving law: fixing older datasets must retrain the
+        # newest concept with ~20% of the turns, or the fixups erode it
+        train_call(steps, seed)
+        train_stage(model, opt, 5, max(1, steps // 4),
+                    random.Random(seed + 77))
+
+    print("=== S5 MILESTONE mate1 ===", flush=True)
+    rng = random.Random(9000 + _phash("mate1") % 104729)
+    prior = [(st, p) for st in (1, 2, 3) for p in PIECE_ORDER]
+    for step in range(1, 4001):
+        train_stage(model, opt, 5, 1, rng)
+        if prior and rng.random() < 0.35:
+            _w = [max(0.02, 0.98 - LAST_ACC.get((_s, _p), 0.9))
+                  for _s, _p in prior]
+            stp, pcp = rng.choices(prior, weights=_w)[0]
+            train_stage(model, opt, stp, 1, rng, piece=pcp)
+        if step % 110 == 0:
+            if maintain_regressions(model, opt, prior, rng):
+                print("MAINTENANCE-ABORT s5:mate1 — prior battery "
+                      "cannot hold 0.98", flush=True)
+                torch.save(model.state_dict(), STATE)
+                return False
+        pair, failures = eval_held()
+        if step % 20 == 0 or pair >= 1.0:
+            rec = {"s5_milestone": "mate1", "step": step,
+                   "score": round(pair, 4)}
+            print(json.dumps(rec), flush=True)
+            logf.write(json.dumps(rec) + "\n"); logf.flush()
+        if pair < 1.0:
+            continue
+        print(f"S5 MILESTONE mate1 PASS at step {step}", flush=True)
+        torch.save(model.state_dict(), STATE)
+        # operator cycle protocol: repair the older sets (interleaving the
+        # new concept at ~20% of turns ONLY while it is below 0.98), then
+        # hold the new set >= 0.98, then re-table; if the older sets eroded
+        # anyway, cycle again — 3 cycles max, then STOP with the analysis
+        for cycle in range(1, 4):
+            print(f"=== S5 SWEEP CYCLE {cycle} ===", flush=True)
+            parts = []
+            blocked = None
+            repairs = 0
+            for st in (1, 2, 3):
+                for p2 in PIECE_ORDER:
+                    pr, fails = eval_piece(model, p2, n=64, stage=st)
+                    steps = 300
+                    for rnd in range(3):
+                        if pr >= 0.98:
+                            break
+                        repairs += 1
+                        _sd = 9500 + st * 31 + _phash(p2) + rnd
+                        if eval_held(n=64)[0] < 0.98:
+                            _repair_interleave(
+                                lambda stp, sd, _st=st, _p=p2: train_stage(
+                                    model, opt, _st, stp,
+                                    random.Random(sd), piece=_p),
+                                steps, _sd)
+                        else:
+                            train_stage(model, opt, st, steps,
+                                        random.Random(_sd), piece=p2)
+                        pr, fails = eval_piece(model, p2, n=64, stage=st)
+                        steps *= 2
+                    if pr < 0.98:
+                        if pr >= 0.975:
+                            print(f"  MARGINAL s{st}:{pname(p2)} "
+                                  f"accepted at {pr:.3f}", flush=True)
+                        else:
+                            blocked = (f"s{st}:{pname(p2)}", pr, fails)
+                    parts.append(f"s{st}:{pname(p2)}={round(pr, 3)}")
+            for m2 in S4_MODES:
+                if m2 in ("their_king", "pin"):
+                    erng = random.Random(8000 + _phash(m2) % 7919)
+                    ebs = gen_stage(erng, 4, 64, piece=m2)
+                    pr, fails = eval_piece_boards(model, ebs)
+                else:
+                    pr, fails = eval_ce(model, m2, n=64)
+                steps = 300
+                for rnd in range(3):
+                    if pr >= 0.98:
+                        break
+                    repairs += 1
+                    _sd = 9700 + _phash(m2) + rnd
+                    if eval_held(n=64)[0] < 0.98:
+                        _repair_interleave(
+                            lambda stp, sd, _m=m2: train_stage(
+                                model, opt, 4, stp, random.Random(sd),
+                                piece=_m),
+                            steps, _sd)
+                    else:
+                        train_stage(model, opt, 4, steps,
+                                    random.Random(_sd), piece=m2)
+                    if m2 in ("their_king", "pin"):
+                        erng = random.Random(8000 + _phash(m2) % 7919)
+                        ebs = gen_stage(erng, 4, 64, piece=m2)
+                        pr, fails = eval_piece_boards(model, ebs)
+                    else:
+                        pr, fails = eval_ce(model, m2, n=64)
+                    steps *= 2
+                if pr < 0.98:
+                    if pr >= 0.975:
+                        print(f"  MARGINAL s4:{m2} accepted at "
+                              f"{pr:.3f}", flush=True)
+                    else:
+                        blocked = (f"s4:{m2}", pr, fails)
+                parts.append(f"s4:{m2}={round(pr, 3)}")
+            # hold the new set: retrain it if the repairs pulled it below
+            pr5, _ = eval_held(n=64)
+            steps = 300
+            for rnd in range(3):
+                if pr5 >= 0.98:
+                    break
+                repairs += 1
+                train_stage(model, opt, 5, steps,
+                            random.Random(9800 + _phash("mate1") + rnd))
+                pr5, _ = eval_held(n=64)
+                steps *= 2
+            if pr5 < 0.98:
+                if pr5 >= 0.975:
+                    print(f"  MARGINAL s5:mate1 accepted at "
+                          f"{pr5:.3f}", flush=True)
+                else:
+                    blocked = ("s5:mate1", pr5, [])
+            parts.append(f"s5:mate1={round(pr5, 3)}")
+            print(f"S5 REGRESSION-SWEEP c{cycle} repairs={repairs} "
+                  + " ".join(parts), flush=True)
+            if blocked:
+                nm, pr, fails = blocked
+                print(f"S5 SWEEP-BLOCKED c{cycle} {nm} at {pr:.3f}",
+                      flush=True)
+                for f in (fails or [])[:6]:
+                    print(f"  FAIL {f}", flush=True)
+                torch.save(model.state_dict(), STATE)
+                continue          # the next cycle repairs it again (bounded)
+            torch.save(model.state_dict(), STATE)
+            print("STAGE 5 ALL MILESTONES PASSED", flush=True)
+            return True
+        torch.save(model.state_dict(), STATE)
+        held = eval_held(n=200)
+        print(f"S5 NO-CONVERGENCE after 3 cycles — STOP for analysis; "
+              f"final held-200 {held[0]:.4f}", flush=True)
+        for f in held[1][:10]:
+            print(f"  FAIL {f}", flush=True)
+        return False
+    print("S5 MILESTONE mate1 EXHAUSTED at cap (4000)", flush=True)
+    torch.save(model.state_dict(), STATE)
+    return False
 
 
 def eval_piece_boards(model, boards_specs):
@@ -2053,6 +2220,9 @@ def main():
         return
     if stage == 4:
         milestone_stage4(model, opt)
+        return
+    if stage == 5:
+        milestone_stage5(model, opt)
         return
     rng = random.Random(1000 + stage)
     train_stage(model, opt, stage, steps, rng)

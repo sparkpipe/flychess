@@ -2162,10 +2162,10 @@ def gate_tb(model, rows, rng):
             fst[0] += int(pick.uci() in optset)
             ok += int(pick.uci() in optset)
     model.train()
-    fam = {}
+    famtbl = {}
     for nm, (fok, ftot) in sorted(fam.items()):
-        fam[nm] = round(fok / max(ftot, 1), 3)
-    return ok / max(tot, 1), tot, fam
+        famtbl[nm] = round(fok / max(ftot, 1), 3)
+    return ok / max(tot, 1), tot, famtbl
 
 
 def main():

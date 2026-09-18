@@ -4,6 +4,7 @@
 - checkpointed edge parts under h01_edges/
 """
 import os, sys, json, time
+import cloudfiles
 # must precede ANY cloudvolume/cloudfiles import: cloudfiles.secrets reads
 # this env once at import; cloud-volume's internal CloudFiles instances
 # (sharding.py) otherwise lock ~800 zero-byte files/sec onto the disk

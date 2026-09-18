@@ -86,33 +86,45 @@ def main():
             continue
 
         # book verdict: terminal NAG in the movetext ($10 =, $18 +-, $19 -+)
-        verdicts = [n.nag for n in g.mainline() if n.nag in (10, 18, 19)]
-        book_cat = {10: "draw", 18: "win", 19: "loss"}.get(
-            verdicts[-1] if verdicts else None)
+        try:
+            verdicts = [max(n.nags) for n in g.mainline()
+                        if n.nags & {10, 18, 19}]
+            book_cat = {10: "draw", 18: "win", 19: "loss"}.get(
+                verdicts[-1] if verdicts else None)
+        except Exception:
+            book_cat = None
 
         # book best: mainline move 1 (skip if the book itself condemns it)
-        node = g.next()
         book_best = None
-        book_moves = {}          # uci -> grade weight
-        if node is not None:
-            mv = node.move
-            if mv in b.legal_moves:
-                book_best = mv.uci()
-                nag = node.nag
-                if nag in (2, 4, 6):        # the book condemns its own line
-                    book_best = None
-                elif nag in (1, 3):
-                    book_moves[mv.uci()] = "best"
-                elif nag in (5, 6):
-                    book_moves[mv.uci()] = "soft"
-            for n in g.mainline():       # collect every graded move
-                if n.move.uci() not in book_moves and n.move in b.legal_moves:
-                    if n.nag in (1, 3):
-                        book_moves[n.move.uci()] = "best"
-                    elif n.nag in (2, 4):
-                        book_moves[n.move.uci()] = "bad"
-                    elif n.nag in (5, 6):
-                        book_moves[n.move.uci()] = "soft"
+        book_moves = {}          # uci -> grade class
+        try:
+            node = g.next()
+            GOOD = {1, 3}
+            BAD = {2, 4}
+            SOFT = {5, 6}
+            if node is not None:
+                mv = node.move
+                if mv in b.legal_moves:
+                    book_best = mv.uci()
+                    nn = node.nags & (GOOD | BAD | SOFT)
+                    if nn & BAD or nn & {6}:
+                        book_best = None      # the book condemns its line
+                    elif nn & GOOD:
+                        book_moves[mv.uci()] = "best"
+                    elif nn & SOFT:
+                        book_moves[mv.uci()] = "soft"
+                for n in g.mainline():        # collect every graded move
+                    nn = n.nags & (GOOD | BAD | SOFT)
+                    if n.move in b.legal_moves \
+                            and n.move.uci() not in book_moves:
+                        if nn & GOOD:
+                            book_moves[n.move.uci()] = "best"
+                        elif nn & BAD:
+                            book_moves[n.move.uci()] = "bad"
+                        elif nn & SOFT:
+                            book_moves[n.move.uci()] = "soft"
+        except Exception:
+            pass
 
         # <=5 pieces: syzygy truth overrides the category, measures fidelity
         tb_note = None

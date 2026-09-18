@@ -1885,7 +1885,11 @@ def main_tb(steps):
     """Stage 6: exact tablebase endings, graded move-value training."""
     rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP",
                        "KQvKB", "KQvKN", "KQvKP", "KQvKR",
-                       "KRPvKR", "KRvKB", "KRvKN", "KRvKP", "KRvKR"])
+                       "KRPvKR", "KRvKB", "KRvKN", "KRvKP", "KRvKR",
+                       "DEGM_Ch1", "DEGM_Ch2", "DEGM_Ch3", "DEGM_Ch4",
+                       "DEGM_Ch5", "DEGM_Ch6", "DEGM_Ch7", "DEGM_Ch8",
+                       "DEGM_Ch9", "DEGM_Ch10", "DEGM_Ch11", "DEGM_Ch12",
+                       "DEGM_Ch13", "DEGM_Ch14", "DEGM_Ch15"])
     torch.manual_seed(0)                     # deterministic init + selection
     flyfeat_cb.feat_vec(chess.Board())
     retino_mode = os.environ.get("RETINO", "")

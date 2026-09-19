@@ -13,11 +13,11 @@ os.environ.setdefault("ANORM", "1")
 import chess
 import torch
 import fly_curriculum as fc
+from fly_curriculum import load_pools
 import flyfeat_cb
 
 flyfeat_cb.feat_vec(chess.Board())
-e = json.loads(open("/tmp/one_question.jsonl").read())
-rows = [dict(e, pool="ONE_Q")]
+rows = load_pools(["ONE_Q"])
 
 rmap = fc.build_retino_map(mode="geo")
 m = fc.FlyCB(len(flyfeat_cb.FEATURE_KEYS), sel_boards=None,

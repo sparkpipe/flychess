@@ -307,10 +307,16 @@ class FlyCB(torch.nn.Module):
                     a = a / (a.abs().mean() + 1e-6)                         * float(os.environ.get("ANORM_T", "2.0"))
                 else:
                     a = torch.clamp(a, -CAP, CAP)
-                if _prev is not None and float(
+                # convergence check every 4th step only: float() here is a
+                # GPU->CPU sync that stalled the pipeline once per step per
+                # board (~4ms/board -> 10K rows/min gate). The iteration is
+                # contractive (leaky + renorm), so up to 3 extra steps past
+                # convergence are fixed-point no-ops.
+                if _ % 4 == 3 and _prev is not None and float(
                         (a - _prev).abs().mean()) < eps:
                     break
-                _prev = a
+                if _ % 4 == 3:
+                    _prev = a
             return a
         w = self.W_sens.weight * self.wmask if self.wmask is not None \
             else self.W_sens.weight

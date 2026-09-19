@@ -2158,7 +2158,7 @@ def graded_targets(entry, b):
     else:                                      # lost: resist longest
         for u, (o, d) in child_ours.items():
             if o == "win":
-                vals[u] = -1.0 + min(d, 100) / 250.0
+                vals[u] = -1.0 + min(d or 50, 100) / 250.0
             elif o == "draw":
                 vals[u] = 0.4                  # salvation draw
             else:

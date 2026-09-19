@@ -51,7 +51,9 @@ def delta(m, base_sd):
 def train_one(qi, e):
     pool = f"TENQ_{qi}"
     with open(f"/home/spec/chess-lab/tbpools/{pool}.jsonl", "w") as f:
-        f.write(json.dumps(dict(e, pool=pool)) + "\n")
+        f.write(json.dumps(dict({k: v for k, v in e.items()
+                                 if k != "_pre"},
+                                pool=pool)) + "\n")
     rows = load_pools([pool])
     m = build_model(0)               # SHARED init seed — deltas comparable
     base_sd = {k: v.detach().cpu().clone()

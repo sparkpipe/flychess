@@ -2257,7 +2257,7 @@ def build_tb_batch(rng, rows, batch):
             rich.append((P["mf"][a:b2], P["pseudo"][a:b2],
                          P["pseudo2"][a:b2], P["threat"][a:b2],
                          P["pcrow"][a:b2]))
-        return fvb, slots, tg2, clb, rich
+        return fvb, slots, tg2, torch.from_numpy(clb).to(DEV), rich
     for b, e in buf:
         mvs = list(b.legal_moves)
         ch = e.get("children", {})

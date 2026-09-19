@@ -2229,6 +2229,35 @@ def build_tb_batch(rng, rows, batch):
     slots = []
     tgts = []
     clb = np.array([CLS_MAP.get(e["cat"], 1) for _, e in buf], dtype=np.int64)
+    if all(e.get("_pre") is not None and e["_pre"][0] is not None
+           for _, e in buf):
+        # PRECOMPUTED PATH (operator ruling: training and playback
+        # aligned): slot/pcrow/mf/pseudo/threat from the packed arrays;
+        # graded values via graded_targets (dict work only, no boards)
+        pres = [e["_pre"] for _, e in buf]
+        fvb = np.stack([flyfeat_cb.feat_vec_by_fen(e["fen"])
+                        for _, e in buf])
+        sl = [(int(P["fen_off"][ri]), int(P["fen_off"][ri + 1]))
+              for P, ri in pres]
+        slots, tg2, rich = [], [], []
+        for i, ((b, e), (a, b2)) in enumerate(zip(buf, sl)):
+            P, ri = e["_pre"]
+            L = b2 - a
+            tv = graded_targets(e, b)
+            sv = P["slot"][a:b2].astype(np.int64)
+            vv = np.zeros(L, dtype=np.float32)
+            vm = np.zeros(L, dtype=bool)
+            for j, mv in enumerate(b.legal_moves):
+                uci = mv.uci()
+                vv[j] = tv.get(uci, 0.0)
+                vm[j] = uci in tv
+            slots.append((sv, vv, vm))
+            bi = int(P["best_idx"][ri])
+            tg2.append(bi if bi >= 0 else -1)
+            rich.append((P["mf"][a:b2], P["pseudo"][a:b2],
+                         P["pseudo2"][a:b2], P["threat"][a:b2],
+                         P["pcrow"][a:b2]))
+        return fvb, slots, tg2, clb, rich
     for b, e in buf:
         mvs = list(b.legal_moves)
         ch = e.get("children", {})

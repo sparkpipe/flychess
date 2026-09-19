@@ -33,12 +33,26 @@ def main():
     del nid
     sign = np.where(typ == 2, 1.0, -1.0).astype(np.float32)
 
-    # top-K by TOTAL degree (in+out): pure in-degree selection induced
-    # only 267K edges at 200K nodes — most partners fell outside the cut;
-    # total degree keeps hub-to-hub edges inside the subgraph
+    # SNOWBALL from hubs: the raw graph spreads 58M edges over ~65M
+    # nodes, so any degree-cut induces a hairball (936K edges / 1M nodes).
+    # Grow the substrate by iteratively adding the nodes with the most
+    # edges INTO the current set — a connected, internally dense
+    # community (the cortical-column analog), depth by rounds.
     indeg = np.bincount(v, minlength=len(nodes))
-    outdeg = np.bincount(u, minlength=len(nodes))
-    top = np.argsort(-(indeg + outdeg))[:TOPK]
+    ROUNDS = int(os.environ.get("H01_ROUNDS", "4"))
+    S = np.argsort(-indeg)[:1000]
+    inS = np.zeros(len(nodes), dtype=bool)
+    for r in range(ROUNDS):
+        inS[S] = True
+        hit = np.bincount(u[inS[v]], minlength=len(nodes))
+        hit[inS] = -1
+        grow = min(TOPK // ROUNDS, int((hit > 0).sum()))
+        S = np.concatenate([S, np.argsort(-hit)[:grow]])
+        inS[S] = True
+        ie = int((inS[u] & inS[v]).sum())
+        print(json.dumps({"round": r + 1, "nodes": len(S),
+                          "internal_edges": ie}), flush=True)
+    top = S
     keep = np.zeros(len(nodes), dtype=bool)
     keep[top] = True
     m = keep[u] & keep[v]

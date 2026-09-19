@@ -62,9 +62,8 @@ class H01Fly(nn.Module):
         self.w_pseudo2 = nn.Parameter(torch.tensor(0.0, device=DEV))
         self.w_threat = nn.Parameter(torch.tensor(0.0, device=DEV))
         self.theta_cls = nn.Parameter(torch.zeros(3, device=DEV))
-        cls_pool = np.asarray(pool)
         self.cls_idx = torch.from_numpy(
-            cls_pool[:64].copy()).to(DEV)
+            np.asarray(pool)[:3].copy()).to(DEV)
         self.retino = None
         self.wmask = None
 

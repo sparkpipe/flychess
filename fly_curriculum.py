@@ -2299,7 +2299,11 @@ def gate_tb(model, rows, rng):
     by_pool = {}
     for e in rows:
         by_pool.setdefault(e.get("pool", "?"), []).append(e)
-    per = max(8, 400 // max(len(by_pool), 1))
+    # n=16/family could not distinguish 0.93 from 1.0 (binomial noise:
+    # p(16/16 at true 0.93) ~= 31% — the "all 1.0" tables were partly
+    # sampling luck). n=150 makes a 1.0 reading a Wilson-95 lower bound
+    # of ~0.975 — the pass bar means 0.98 again.
+    per = 150
     with torch.no_grad():
         for pn, prows in by_pool.items():
             fst = fam.setdefault(pn, [0, 0])

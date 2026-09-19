@@ -2294,11 +2294,17 @@ def gate_tb(model, rows, rng):
     model.eval()
     ok = tot = 0
     fam = {}
+    # STRATIFIED sampling: equal n per pool — uniform sampling starved the
+    # small pools (DEGM chapters are 1% of rows and never got gated)
+    by_pool = {}
+    for e in rows:
+        by_pool.setdefault(e.get("pool", "?"), []).append(e)
+    per = max(8, 400 // max(len(by_pool), 1))
     with torch.no_grad():
-        for _ in range(400):
-            e = rows[rng.randrange(len(rows))]
-            pn = e.get("pool", "?")
+        for pn, prows in by_pool.items():
             fst = fam.setdefault(pn, [0, 0])
+            for _ in range(per):
+                e = prows[rng.randrange(len(prows))]
             try:
                 b = chess.Board(e["fen"])
             except Exception:

@@ -84,6 +84,9 @@ class H01Fly(nn.Module):
             torch.from_numpy(s_s.astype(np.float32)).to(DEV),
             size=(self.N, self.N))
 
+    def logits_all(self, a):
+        return self.theta.unsqueeze(0) * a[self.readout_idx].T
+
     def propagate(self, fvb, reach=None):
         x = torch.from_numpy(fvb).to(DEV)
         B = x.shape[0]

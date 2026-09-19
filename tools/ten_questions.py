@@ -29,6 +29,53 @@ CAP = 2000
 LR = float(os.environ.get("LR", "3e-4"))
 
 
+
+def pack_pre(pool, e):
+    """Pack the .pre.npz for a single-question pool (the gate REQUIRES
+    _pre arrays — rows without them score a silent 0/0)."""
+    import numpy as _np
+    _PC = fc._PC_IDX
+    FLIP = {"win": "loss", "loss": "win", "draw": "draw",
+            "cursed_win": "cursed_loss", "cursed_loss": "cursed_win"}
+    b = chess.Board(e["fen"])
+    mvs = list(b.legal_moves)
+    p2 = {(pm.from_square, pm.to_square) for pm in b.pseudo_legal_moves}
+    ch = e.get("children", {})
+    optcat = {"win": "loss", "cursed_win": "loss", "draw": "draw",
+              "cursed_loss": "win", "loss": "win"}[e["cat"]]
+    optset = {u for u, c in ch.items() if FLIP.get(c.get("cat")) == optcat}
+    slot, pcrow, mfl, ps, ps2, thr, opt = [], [], [], [], [], [], []
+    bi = 0
+    for j, mv in enumerate(mvs):
+        u = mv.uci()
+        slot.append(mv.from_square * 64 + mv.to_square)
+        pc = b.piece_at(mv.from_square)
+        pcrow.append(_PC[pc.piece_type] if pc else 0)
+        mfl.append(flyfeat_cb.move_feats(b, mv))
+        ps.append(1.0 if (b.attacks_mask(mv.from_square)
+                          & chess.BB_SQUARES[mv.to_square]) else 0.0)
+        ps2.append(1.0 if (mv.from_square, mv.to_square) in p2 else 0.0)
+        b.push(mv)
+        thr.append(min(bin(b.attacks_mask(mv.to_square)
+                          & b.occupied_co[b.turn]).count("1"), 4) / 4.0)
+        b.pop()
+        opt.append(1.0 if u in optset else 0.0)
+        if u == e.get("best"):
+            bi = j
+    _np.savez_compressed(
+        f"/home/spec/chess-lab/tbpools/{pool}.pre.npz",
+        fen_off=_np.array([0, len(mvs)], _np.int64),
+        slot=_np.array(slot, _np.int64),
+        pcrow=_np.array(pcrow, _np.int64),
+        mf=_np.array(mfl, _np.float32),
+        pseudo=_np.array(ps, _np.float32),
+        pseudo2=_np.array(ps2, _np.float32),
+        threat=_np.array(thr, _np.float32),
+        opt=_np.array(opt, _np.float32),
+        best_idx=_np.array([bi], _np.int64),
+        fens=_np.array([e["fen"]], dtype=object))
+
+
 def build_model(seed=0):
     torch.manual_seed(seed)
     rmap = fc.build_retino_map(mode="geo")
@@ -50,10 +97,10 @@ def delta(m, base_sd):
 
 def train_one(qi, e):
     pool = f"TENQ_{qi}"
+    e = {k: v for k, v in e.items() if k != "_pre"}
     with open(f"/home/spec/chess-lab/tbpools/{pool}.jsonl", "w") as f:
-        f.write(json.dumps(dict({k: v for k, v in e.items()
-                                 if k != "_pre"},
-                                pool=pool)) + "\n")
+        f.write(json.dumps(dict(e, pool=pool)) + "\n")
+    pack_pre(pool, e)
     rows = load_pools([pool])
     m = build_model(0)               # SHARED init seed — deltas comparable
     base_sd = {k: v.detach().cpu().clone()

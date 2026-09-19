@@ -347,7 +347,14 @@ def main():
     else:
         print(f"FRESH MoE fly ({N_EXP} experts)", flush=True)
     opt = torch.optim.Adam(m.parameters(), lr=3e-4)
-    rows = load_pools([f"DEGM_Ch{i}" for i in range(1, 16)])
+    # MOE_MIX=1: the interference test — DEGM 50/50 with the passed
+    # mate1 curriculum (the canonical erosion victim). If the gate routes,
+    # mateIn1 holds >=0.98 while DEGM climbs past the single-door ceiling.
+    if os.environ.get("MOE_MIX", "0") == "1":
+        rows = load_pools([f"DEGM_Ch{i}" for i in range(1, 16)]
+                          + ["mateIn1"])
+    else:
+        rows = load_pools([f"DEGM_Ch{i}" for i in range(1, 16)])
     rng = random.Random(6000)
     step = 0
     gw = []

@@ -357,11 +357,18 @@ def main():
         rows = load_pools([f"DEGM_Ch{i}" for i in range(1, 16)])
     rng = random.Random(6000)
     step = 0
-    gw = []
+    mix_a = [e for e in rows if e.get("pool") == "mateIn1"] \
+        if os.environ.get("MOE_MIX", "0") == "1" else None
+    mix_b = [e for e in rows if e.get("pool") != "mateIn1"] \
+        if mix_a is not None else None
     while True:
         for _ in range(500):
             step += 1
-            tb_step_moe(m, opt, rows, rng)
+            if mix_a is not None:
+                tb_step_moe(m, opt, mix_a if step % 2 == 0 else mix_b,
+                            rng)
+            else:
+                tb_step_moe(m, opt, rows, rng)
         torch.save(m.state_dict(), STATE + ".tmp")
         os.replace(STATE + ".tmp", STATE)
         pair, fam = gate_moe(m, rows)

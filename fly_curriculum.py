@@ -2041,25 +2041,29 @@ def main_tb(steps):
     rng = random.Random(6000)
     t0 = time.time()
     step = 0
+    block = 0
     while True:
         for _ in range(500):
             step += 1
             l = tb_step(model, opt, rows, rng)
-        # the maintenance law (same as every stage): hold prior concepts
-        # >= 0.98 while the focus trains — the missing piece that eroded
-        # mate1 1.00 -> 0.825 during pure-TB training
+        block += 1
+        # the maintenance law, at a cadence that doesn't starve the focus:
+        # every 5 blocks (2500 focus steps). The every-block cascade spent
+        # ~90% of compute repairing and the four zero-cores never trained.
         def _tb_focus(stp, sd):
             frng = random.Random(sd)
             for _ in range(max(1, stp // 4)):
                 tb_step(model, opt, rows, frng)
-        held = maintain_holdouts(model, opt, rng,
-                                 focus_below_floor=True,
-                                 focus_fn=_tb_focus)
+        held = (maintain_holdouts(model, opt, rng,
+                                  focus_below_floor=True,
+                                  focus_fn=_tb_focus)
+                if block % 5 == 0 else None)
         worst_held = min(held.values()) if held else 1.0
         torch.save(model.state_dict(), STATE + ".tmp")
         os.replace(STATE + ".tmp", STATE)
         pair_gate, top, fam = gate_tb(model, rows, random.Random(777))
         worst = min(fam.values()) if fam else 0.0
+        FAM_SCORE.update(fam)
         rec = {"stage": 6, "step": step, "loss": round(l, 4),
                "opt_set": round(pair_gate, 4), "worst_fam": worst,
                "worst_held": worst_held,
@@ -2068,8 +2072,10 @@ def main_tb(steps):
         print(json.dumps(rec), flush=True)
         print("S6 FAM " + " ".join(f"{k}={v}" for k, v in fam.items()),
               flush=True)
-        print("S6 HELD " + " ".join(f"{k}={v}" for k, v in held.items()),
-              flush=True)
+        if held is not None:
+            print("S6 HELD " + " ".join(f"{k}={v}"
+                                        for k, v in held.items()),
+                  flush=True)
         with open(LOGF, "a") as f:
             f.write(json.dumps(rec) + "\n")
         if rec["pass"]:
@@ -2157,10 +2163,24 @@ def graded_targets(entry, b):
     return vals
 
 
+FAM_SCORE = {}              # pool -> last gate score (weighted sampling)
+
+
 def build_tb_batch(rng, rows, batch):
     buf = []
+    pools = [e.get("pool", "?") for e in rows]
+    wts = [max(0.05, 1.0 - FAM_SCORE.get(pl, 0.0)) for pl in pools]
+    import bisect
+    cum = []
+    t = 0.0
+    for w in wts:
+        t += w
+        cum.append(t)
+    def pick():
+        r = rng.random() * t
+        return rows[bisect.bisect_left(cum, r)]
     while len(buf) < batch:
-        e = rows[rng.randrange(len(rows))]
+        e = pick()
         try:
             b = chess.Board(e["fen"])
             if b.is_game_over():

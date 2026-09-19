@@ -2123,10 +2123,15 @@ def load_pools(names):
     rows = []
     for nm in names:
         for p in _g.glob(f"{POOL_DIR}/{nm}.jsonl"):
+            pre = None
+            if os.path.exists(p.replace(".jsonl", ".pre.npz")):
+                pre = np.load(p.replace(".jsonl", ".pre.npz"),
+                              allow_pickle=True)
             with open(p) as f:
-                for line in f:
+                for ri, line in enumerate(f):
                     try:
-                        rows.append(dict(json.loads(line), pool=nm))
+                        rows.append(dict(json.loads(line), pool=nm,
+                                         _pre=(pre, ri)))
                     except Exception:
                         pass
     print(f"pools {names}: {len(rows)} exact-labeled positions", flush=True)
@@ -2333,22 +2338,60 @@ def gate_tb(model, rows, rng, exhaustive=False):
                     else [prows[rng.randrange(len(prows))]
                           for _ in range(150)])
             for ci in range(0, len(todo), CH):
-                chunk = todo[ci:ci + CH]
-                boards, keep = [], []
-                for e in chunk:
-                    try:
-                        b = chess.Board(e["fen"])
-                    except Exception:
-                        continue
-                    if b.is_game_over():
-                        continue
-                    mvs = list(b.legal_moves)
-                    if not mvs:
-                        continue
-                    boards.append(b)
-                    keep.append((e, mvs))
-                if not keep:
+                chunk = [e for e in todo[ci:ci + CH]
+                         if e.get("_pre") is not None
+                         and e["_pre"][0] is not None]
+                if not chunk:
                     continue
+                # PRECOMPUTED PATH: slice packed arrays; no board objects
+                pres = [e["_pre"] for e in chunk]
+                fens = [e["fen"] for e in chunk]
+                sl = [(int(P["fen_off"][ri]), int(P["fen_off"][ri + 1]))
+                      for P, ri in pres]
+                Bn = len(chunk)
+                M = max(b - a for a, b in sl)
+                P0 = pres[0][0]
+                F = P0["mf"].shape[1]
+                fvb = np.stack([flyfeat_cb.feat_vec_by_fen(f)
+                                for f in fens]) \
+                    if hasattr(flyfeat_cb, "feat_vec_by_fen") else \
+                    np.stack([flyfeat_cb.feat_vec(chess.Board(f))[0]
+                              for f in fens])
+                slotb = np.zeros((Bn, M), dtype=np.int64)
+                pcrowb = np.zeros((Bn, M), dtype=np.int64)
+                mfb = np.zeros((Bn, M, F), dtype=np.float32)
+                maskb = np.zeros((Bn, M), dtype=bool)
+                pseudob = np.zeros((Bn, M), dtype=np.float32)
+                pseudo2b = np.zeros((Bn, M), dtype=np.float32)
+                threatb = np.zeros((Bn, M), dtype=np.float32)
+                for i, ((a, b2), (P, ri)) in enumerate(zip(sl, pres)):
+                    L = b2 - a
+                    slotb[i, :L] = P["slot"][a:b2]
+                    pcrowb[i, :L] = P["pcrow"][a:b2]
+                    mfb[i, :L] = P["mf"][a:b2]
+                    maskb[i, :L] = True
+                    pseudob[i, :L] = P["pseudo"][a:b2]
+                    pseudo2b[i, :L] = P["pseudo2"][a:b2]
+                    threatb[i, :L] = P["threat"][a:b2]
+                T, logp, T_all, clsg = forward(model, fvb, slotb, pcrowb,
+                                               mfb, maskb, pseudob,
+                                               threatb, pseudo2b)
+                picks = torch.argmax(T, dim=1).tolist()
+                for i, e in enumerate(chunk):
+                    P, ri = e["_pre"]
+                    a, b2 = sl[i]
+                    pick = int(picks[i])
+                    o = float(P["opt"][a + pick]) if pick < (b2 - a) \
+                        else 0.0
+                    tot += 1
+                    fst[1] += 1
+                    hit = o > 0.5
+                    fst[0] += int(hit)
+                    ok += int(hit)
+                    if not hit and exhaustive:
+                        FAIL_FENS.add(e["fen"])
+                continue
+                boards, keep = [], []
                 Bn = len(keep)
                 M = max(len(mv) for _, mv in keep)
                 F = flyfeat_cb.move_feats(keep[0][1][0]).shape[0]

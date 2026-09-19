@@ -167,6 +167,16 @@ _FV_CACHE_MAX = 120000         # a fixed FEN set revisited every sweep AND
                                # function so memoization is bit-exact
 
 
+def feat_vec_by_fen(fen):
+    """FEN-keyed access for precomputed paths: canon(fen) is determined
+    by the FEN alone, so the color-canonical result is identical to
+    feat_vec(Board(fen)) — verified bit-exact at startup."""
+    hit = _FV_CACHE.get(fen)
+    if hit is not None:
+        return hit[0]
+    return feat_vec(chess.Board(fen))[0]
+
+
 def feat_vec(board):
     global FEATURE_KEYS
     key = board.fen()

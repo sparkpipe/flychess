@@ -36,7 +36,8 @@ def train_to_gate(rows, tag, state):
     FAM_SCORE.update({rows[0].get("pool", tag): 0.0})
     step = 0
     best = 0.0
-    best_sd = None        # snapshot at the PEAK (operator ruling): the
+    best_sd = None
+    best_solved = frozenset()        # snapshot at the PEAK (operator ruling): the
                           # final state may sit below the best; the split
                           # must use the fly's best knowledge
     while step < CAP:
@@ -52,17 +53,31 @@ def train_to_gate(rows, tag, state):
             best = pair
             best_sd = {k: v.detach().cpu().clone()
                        for k, v in m.state_dict().items()}
+            # the snapshot carries its own answer set (operator ruling):
+            # the split uses the RECORDED solved-set from the peak; the
+            # later re-eval is verification, never the selector
+            sv, fl = eval_solved(m, rows)
+            best_solved = frozenset(e["fen"] for e in sv)
+            print(json.dumps({"tag": tag, "step": step, "NEW-BEST":
+                              round(pair, 4),
+                              "solved": len(best_solved),
+                              "of": len(rows)}), flush=True)
         print(json.dumps({"tag": tag, "step": step,
                           "exhaustive": round(pair, 4),
                           "best": round(best, 4)}), flush=True)
         if pair >= 0.98:
-            return True, best, m
+            return True, best, m, best_solved
     if best_sd is not None:
         m.load_state_dict(best_sd)
-    return False, best, m
+        sv, fl = eval_solved(m, rows)
+        now = frozenset(e["fen"] for e in sv)
+        print(json.dumps({"tag": tag, "VERIFY": now == best_solved,
+                          "recorded": len(best_solved),
+                          "replayed": len(now)}), flush=True)
+    return False, best, m, best_solved
 
 
-def split_by_outcome(model, rows):
+def eval_solved(model, rows):
     """Failure-driven split (operator ruling): the positions the capped
     fly SOLVES form one subsection; the ones it FAILS form another."""
     solved, failed = [], []
@@ -142,12 +157,13 @@ def write_pool(rows, pool):
 
 def run(rows, tag, depth=0, model=None):
     state = f"/home/spec/chess-lab/flies_mof/l0_{tag}.pt"
-    ok, best, m = train_to_gate(rows, tag, state)
+    ok, best, m, best_solved = train_to_gate(rows, tag, state)
     if ok:
         print(f"PROOF {tag}: PASSED (n={len(rows)})", flush=True)
         return [(tag, len(rows), "PASS")]
     if len(rows) > MIN_SPLIT * 2 and depth < 4:
-        solved, failed = split_by_outcome(m, rows)
+        solved = [e for e in rows if e["fen"] in best_solved]
+        failed = [e for e in rows if e["fen"] not in best_solved]
         if len(solved) < MIN_SPLIT or len(failed) < MIN_SPLIT:
             print(f"PROOF {tag}: FAIL (n={len(rows)}, best {best:.3f}, "
                   f"outcome split too small "

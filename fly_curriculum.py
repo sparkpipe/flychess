@@ -2148,11 +2148,13 @@ def load_pools(names):
 
 
 def graded_targets(entry, b):
-    """Per-legal-move value targets from the tablebase children."""
+    """Per-legal-move value targets, CATEGORICAL ONLY (operator ruling
+    2026-09-19: no TB-play training — DTZ pace, the 50-move cliff and
+    the resistance ladder are machine-perfect targets the fly cannot
+    learn naturally). A move's value is its outcome band, nothing more;
+    dtz fields in children are provenance, never targets."""
     cat = entry["cat"]
     ch = entry.get("children", {})
-    opt = {"win": "loss", "cursed_win": "loss", "draw": "draw",
-           "cursed_loss": "win", "loss": "win"}[cat]
     # child category is from the OPPONENT's perspective; flip to ours
     def ours(c):
         return {"win": "loss", "loss": "win", "draw": "draw",
@@ -2163,39 +2165,29 @@ def graded_targets(entry, b):
         cc = c.get("cat")
         if cc is None:
             continue
-        o = ours(cc)
-        dtz = c.get("dtz")
-        child_ours[uci] = (o, dtz if dtz is not None else None)
+        child_ours[uci] = ours(cc)
     if cat in ("win", "cursed_win"):
-        winners = [(u, d) for u, (o, d) in child_ours.items() if o == "loss"]
-        known = [d for _, d in winners if d is not None]
-        best_dtz = min(known) if known else None
-        for u, (o, d) in child_ours.items():
-            if o == "loss":
-                if d is None:                  # SF-graded row: no DTZ ladder
-                    vals[u] = 1.0
-                elif d >= 98:                  # counter cliff: win evaporates
-                    vals[u] = -0.4
-                else:
-                    vals[u] = 1.0 - min(d - best_dtz, 30) * 0.02
+        for u, o in child_ours.items():
+            if o == "loss":                     # keeps the win — flat 1.0
+                vals[u] = 1.0
             elif o == "draw":
-                vals[u] = -0.6                 # lost the win
+                vals[u] = -0.6                  # lost the win
             else:
-                vals[u] = -1.0                 # lost the game
+                vals[u] = -1.0                  # lost the game
     elif cat == "draw":
-        for u, (o, d) in child_ours.items():
+        for u, o in child_ours.items():
             if o == "draw":
-                vals[u] = 0.6                  # hold the draw
+                vals[u] = 0.6                   # hold the draw
             else:
-                vals[u] = -1.0                 # drifted into loss
-    else:                                      # lost: resist longest
-        for u, (o, d) in child_ours.items():
+                vals[u] = -1.0                  # drifted into loss
+    else:                                       # lost: categorical only
+        for u, o in child_ours.items():
             if o == "win":
-                vals[u] = -1.0 + min(d or 50, 100) / 250.0
+                vals[u] = -0.8                  # still lost — flat
             elif o == "draw":
-                vals[u] = 0.4                  # salvation draw
+                vals[u] = 0.4                   # salvation draw
             else:
-                vals[u] = 0.6
+                vals[u] = 0.6                   # the key was wrong: we win
     return vals
 
 

@@ -161,13 +161,27 @@ def extract(board):
     return f
 
 
+_FV_CACHE = {}                 # fen -> (vec, canon_board): the pools are
+_FV_CACHE_MAX = 120000         # a fixed FEN set revisited every sweep AND
+                               # every training batch; extract is a pure
+                               # function so memoization is bit-exact
+
+
 def feat_vec(board):
     global FEATURE_KEYS
+    key = board.fen()
+    hit = _FV_CACHE.get(key)
+    if hit is not None:
+        v, cb = hit
+        return v, cb.copy()
     cb = canon(board)
     d = extract(cb)
     if FEATURE_KEYS is None:
         FEATURE_KEYS = sorted(d.keys())
-    return np.array([d.get(k, 0.0) for k in FEATURE_KEYS], dtype=np.float32), cb
+    v = np.array([d.get(k, 0.0) for k in FEATURE_KEYS], dtype=np.float32)
+    if len(_FV_CACHE) < _FV_CACHE_MAX:
+        _FV_CACHE[key] = (v, cb)
+    return v, cb.copy()
 
 
 MOVE_DIMS = 17

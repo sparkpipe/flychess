@@ -36,6 +36,9 @@ def train_to_gate(rows, tag, state):
     FAM_SCORE.update({rows[0].get("pool", tag): 0.0})
     step = 0
     best = 0.0
+    best_sd = None        # snapshot at the PEAK (operator ruling): the
+                          # final state may sit below the best; the split
+                          # must use the fly's best knowledge
     while step < CAP:
         for _ in range(500):
             step += 1
@@ -45,11 +48,17 @@ def train_to_gate(rows, tag, state):
         pair, _, _ = fc.gate_tb(m, rows, random.Random(777),
                                 exhaustive=True)
         FAM_SCORE.update({rows[0].get("pool", tag): pair})
-        best = max(best, pair)
+        if pair > best:
+            best = pair
+            best_sd = {k: v.detach().cpu().clone()
+                       for k, v in m.state_dict().items()}
         print(json.dumps({"tag": tag, "step": step,
-                          "exhaustive": round(pair, 4)}), flush=True)
+                          "exhaustive": round(pair, 4),
+                          "best": round(best, 4)}), flush=True)
         if pair >= 0.98:
             return True, best, m
+    if best_sd is not None:
+        m.load_state_dict(best_sd)
     return False, best, m
 
 

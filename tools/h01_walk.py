@@ -77,18 +77,20 @@ def walk_relationship(rid, spec_d):
                 mi = r.get_minishard_index(f"{shard}.shard", idx, int(ms))
                 if mi is None or not len(mi):
                     continue
-                base = int(idx[0, 0]) if False else None  # offsets below
+                # FAST PATH (verified byte-identical to get_data): rows
+                # are (segid, absolute_offset, length); one contiguous
+                # read per minishard, slice + gunzip per entry — the
+                # per-id reader cost ~30 min/shard, this is IO-bound
+                lo = int(mi[:, 1].min())
+                hi = int((mi[:, 1] + mi[:, 2]).max())
+                f.seek(lo)
+                blob = f.read(hi - lo)
                 for row in mi:
-                    segid, b0, b1 = int(row[0]), int(row[1]), int(row[2])
-                    # byte offsets in the minishard index are relative to
-                    # the END of the shard index; cloud-volume computes
-                    # the data start as the shard's index end. We read via
-                    # the reader for correctness instead of manual math.
-                    try:
-                        v = r.get_data(segid)
-                    except Exception:
-                        continue
-                    if not v or len(v) < 44:
+                    segid = int(row[0])
+                    off = int(row[1]) - lo
+                    ln = int(row[2])
+                    v = blob[off:off + ln]
+                    if len(v) < 44:
                         continue
                     if v[:1] == b"\x1f":           # gzip magic
                         try:

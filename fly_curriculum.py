@@ -1972,9 +1972,12 @@ def maintain_holdouts(model, opt, rng, focus_below_floor=True,
 
 def main_tb(steps):
     """Stage 6: exact tablebase endings, graded move-value training."""
+    # operator order 2026-09-19: DEGM chapters BEFORE the deep-technique
+    # cores — the four cores (KQvKR/KRPvKR/KRvKR/KQvKP) are parked until
+    # the book chapters pass; solved TB families stay as 5% replay
     rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP",
-                       "KQvKB", "KQvKN", "KQvKP", "KQvKR",
-                       "KRPvKR", "KRvKB", "KRvKN", "KRvKP", "KRvKR",
+                       "KQvKB", "KQvKN",
+                       "KRvKB", "KRvKN", "KRvKP",
                        "DEGM_Ch1", "DEGM_Ch2", "DEGM_Ch3", "DEGM_Ch4",
                        "DEGM_Ch5", "DEGM_Ch6", "DEGM_Ch7", "DEGM_Ch8",
                        "DEGM_Ch9", "DEGM_Ch10", "DEGM_Ch11", "DEGM_Ch12",

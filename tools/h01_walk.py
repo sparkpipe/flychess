@@ -90,20 +90,31 @@ def walk_relationship(rid, spec_d):
                     off = int(row[1]) - lo
                     ln = int(row[2])
                     v = blob[off:off + ln]
-                    if len(v) < 44:
-                        continue
                     if v[:1] == b"\x1f":           # gzip magic
                         try:
                             v = gzip.decompress(v)
                         except Exception:
                             continue
-                        if len(v) < 44:
-                            continue
-                    typ = struct.unpack_from("<I", v, 32)[0]
-                    partner = struct.unpack_from("<Q", v, 36)[0]
-                    sids.append(segid)
-                    partners.append(partner)
-                    types_.append(typ)
+                    # AUTHORITATIVE LAYOUT (fits all observed lengths and
+                    # cloud-volume's codec order: geometry records first,
+                    # relationship id list last):
+                    #   [count u32][pad 4]
+                    #   count x [ptA 3xf32 | ptB 3xf32 | type u32]  (28B)
+                    #   count x partner u64                        (tail)
+                    if len(v) < 12:
+                        continue
+                    cnt = struct.unpack_from("<I", v, 0)[0]
+                    if cnt == 0 or len(v) != 8 + 28 * cnt + 8 * cnt:
+                        continue
+                    tail = 8 + 28 * cnt
+                    for k in range(cnt):
+                        typ = struct.unpack_from("<I", v,
+                                                 8 + 28 * k + 24)[0]
+                        partner = struct.unpack_from(
+                            "<Q", v, tail + 8 * k)[0]
+                        sids.append(segid)
+                        partners.append(partner)
+                        types_.append(typ)
         done = shard + 1
         print(json.dumps({"rel": rid, "shards": done, "entries":
                           len(sids), "elapsed_s":

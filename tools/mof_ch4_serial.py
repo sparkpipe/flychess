@@ -184,10 +184,15 @@ def run(rows, tag, depth=0, model=None):
 
 def main():
     flyfeat_cb.feat_vec(chess.Board())
+    import glob as _g
     results = []
-    for s in ("DEGM_Ch4_s0", "DEGM_Ch4_s1"):
-        rows = load_pools([s])
-        results += run(rows, s)
+    for path in sorted(_g.glob("/home/spec/chess-lab/tbpools/"
+                               "DEGM_Ch4_s*.jsonl")):
+        nm = os.path.basename(path).replace(".jsonl", "")
+        rows = load_pools([nm])
+        if not rows:
+            continue
+        results += run(rows, nm)
     print("CH4-PROOF-COMPLETE " + json.dumps(results), flush=True)
 
 

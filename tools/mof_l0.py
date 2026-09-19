@@ -16,8 +16,17 @@ import fly_curriculum as fc
 import flyfeat_cb
 from fly_curriculum import DEV, load_pools, FAM_SCORE
 
-CH = int(os.environ.get("CH", "1"))
-STATE = f"/home/spec/chess-lab/flies_mof/l0_ch{CH}.pt"
+# POOL = full pool name (e.g. DEGM_Ch1 or DEGM_Ch1_s3); CH kept for
+# backward compat with the chapter swarm
+POOL = os.environ.get("POOL", "")
+CH = int(os.environ.get("CH", "0")) if not POOL else 0
+if POOL:
+    TAG = POOL.replace("DEGM_", "")
+    rows_pool = [POOL]
+else:
+    TAG = f"ch{CH}"
+    rows_pool = [f"DEGM_Ch{CH}"]
+STATE = f"/home/spec/chess-lab/flies_mof/l0_{TAG}.pt"
 CAP_STEPS = int(os.environ.get("CAP_STEPS", "40000"))
 
 
@@ -32,13 +41,13 @@ def main():
     if os.path.exists(STATE):
         m.load_state_dict(torch.load(STATE, weights_only=True),
                           strict=False)
-        print(f"ch{CH}: resumed", flush=True)
+        print(f"{TAG}: resumed", flush=True)
     else:
-        print(f"ch{CH}: FRESH dedicated fly", flush=True)
+        print(f"{TAG}: FRESH dedicated fly", flush=True)
     opt = torch.optim.Adam(m.parameters(), lr=3e-4)
-    rows = load_pools([f"DEGM_Ch{CH}"])
-    rng = random.Random(6000 + CH)
-    FAM_SCORE.update({f"DEGM_Ch{CH}": 0.0})
+    rows = load_pools(rows_pool)
+    rng = random.Random(6000 + (CH or hash(TAG) % 100000))
+    FAM_SCORE.update({rows_pool[0]: 0.0})
     step = 0
     while step < CAP_STEPS:
         for _ in range(500):
@@ -50,14 +59,14 @@ def main():
                                   exhaustive=True)
         worst = min(fam.values()) if fam else 0.0
         FAM_SCORE.update(fam)
-        print(json.dumps({"l0_ch": CH, "step": step,
+        print(json.dumps({"l0": TAG, "step": step,
                           "exhaustive": round(pair, 4)}), flush=True)
         if pair >= 0.98:
-            print(f"L0-CH{CH}-PASSED at step {step} "
+            print(f"L0-{TAG}-PASSED at step {step} "
                   f"(exhaustive {pair:.4f})", flush=True)
             break
     else:
-        print(f"L0-CH{CH}-CAP-EXHAUSTED (last {pair:.4f})", flush=True)
+        print(f"L0-{TAG}-CAP-EXHAUSTED (last {pair:.4f})", flush=True)
 
 
 if __name__ == "__main__":

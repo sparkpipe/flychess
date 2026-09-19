@@ -79,8 +79,8 @@ class H01Fly(nn.Module):
         d = np.load(GRAPH)
         s_s = d["sign"][order]
         self.WT = torch.sparse_csr_tensor(
-            torch.from_numpy(indptr).to(DEV).to(torch.int64),
-            torch.from_numpy(u_s.astype(np.int64)).to(DEV).to(torch.int32),
+            torch.from_numpy(indptr.astype(np.int32)).to(DEV),
+            torch.from_numpy(u_s.astype(np.int32)).to(DEV),
             torch.from_numpy(s_s.astype(np.float32)).to(DEV),
             size=(self.N, self.N))
 

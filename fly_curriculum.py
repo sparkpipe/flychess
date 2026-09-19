@@ -2076,7 +2076,10 @@ def main_tb(steps):
         worst_held = min(held.values()) if held else 1.0
         torch.save(model.state_dict(), STATE + ".tmp")
         os.replace(STATE + ".tmp", STATE)
-        pair_gate, top, fam = gate_tb(model, rows, random.Random(777))
+        # EXHAUSTIVE every gate (operator ruling: no sampled telemetry,
+        # no 'effectively exhaustive'): 100% of every pool, every block
+        pair_gate, top, fam = gate_tb(model, rows, random.Random(777),
+                                      exhaustive=True)
         worst = min(fam.values()) if fam else 0.0
         FAM_SCORE.update(fam)
         rec = {"stage": 6, "step": step, "loss": round(l, 4),

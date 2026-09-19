@@ -1980,14 +1980,19 @@ def main_tb(steps):
     """Stage 6: exact tablebase endings, graded move-value training."""
     # operator order 2026-09-19: DEGM chapters BEFORE the deep-technique
     # cores — the four cores (KQvKR/KRPvKR/KRvKR/KQvKP) are parked until
-    # the book chapters pass; solved TB families stay as 5% replay
-    rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP",
-                       "KQvKB", "KQvKN",
-                       "KRvKB", "KRvKN", "KRvKP",
-                       "DEGM_Ch1", "DEGM_Ch2", "DEGM_Ch3", "DEGM_Ch4",
-                       "DEGM_Ch5", "DEGM_Ch6", "DEGM_Ch7", "DEGM_Ch8",
-                       "DEGM_Ch9", "DEGM_Ch10", "DEGM_Ch11", "DEGM_Ch12",
-                       "DEGM_Ch13", "DEGM_Ch14", "DEGM_Ch15"])
+    # the book chapters pass; solved TB families stay as 5% replay.
+    # DEGM_ONLY=1 (operator experiment): a BRAND-NEW fly trained on the
+    # book chapters ALONE — the capacity-vs-interference control.
+    if os.environ.get("DEGM_ONLY", "0") == "1":
+        rows = load_pools([f"DEGM_Ch{i}" for i in range(1, 16)])
+    else:
+        rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP",
+                           "KQvKB", "KQvKN",
+                           "KRvKB", "KRvKN", "KRvKP",
+                           "DEGM_Ch1", "DEGM_Ch2", "DEGM_Ch3", "DEGM_Ch4",
+                           "DEGM_Ch5", "DEGM_Ch6", "DEGM_Ch7", "DEGM_Ch8",
+                           "DEGM_Ch9", "DEGM_Ch10", "DEGM_Ch11", "DEGM_Ch12",
+                           "DEGM_Ch13", "DEGM_Ch14", "DEGM_Ch15"])
     torch.manual_seed(0)                     # deterministic init + selection
     flyfeat_cb.feat_vec(chess.Board())
     retino_mode = os.environ.get("RETINO", "")
@@ -2063,10 +2068,11 @@ def main_tb(steps):
             frng = random.Random(sd)
             for _ in range(max(1, stp // 4)):
                 tb_step(model, opt, rows, frng)
-        held = (maintain_holdouts(model, opt, rng,
-                                  focus_below_floor=True,
-                                  focus_fn=_tb_focus)
-                if block % 5 == 0 else None)
+        held = (None if os.environ.get("DEGM_ONLY", "0") == "1" else
+                (maintain_holdouts(model, opt, rng,
+                                   focus_below_floor=True,
+                                   focus_fn=_tb_focus)
+                 if block % 5 == 0 else None))
         worst_held = min(held.values()) if held else 1.0
         torch.save(model.state_dict(), STATE + ".tmp")
         os.replace(STATE + ".tmp", STATE)

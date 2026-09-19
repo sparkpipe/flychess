@@ -33,9 +33,12 @@ def main():
     del nid
     sign = np.where(typ == 2, 1.0, -1.0).astype(np.float32)
 
-    # top-K by IN-degree within the universe
+    # top-K by TOTAL degree (in+out): pure in-degree selection induced
+    # only 267K edges at 200K nodes — most partners fell outside the cut;
+    # total degree keeps hub-to-hub edges inside the subgraph
     indeg = np.bincount(v, minlength=len(nodes))
-    top = np.argsort(-indeg)[:TOPK]
+    outdeg = np.bincount(u, minlength=len(nodes))
+    top = np.argsort(-(indeg + outdeg))[:TOPK]
     keep = np.zeros(len(nodes), dtype=bool)
     keep[top] = True
     m = keep[u] & keep[v]

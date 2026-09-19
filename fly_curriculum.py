@@ -20,6 +20,11 @@ State: fly_cb.pt  (evolving; stages build on the previous stage's weights)
 import sys, os, json, time, random, chess, zlib
 import numpy as np
 import torch
+# GPU trainers need no CPU thread army: PyTorch's default OpenMP
+# pool is 2x cores (56 threads on 24) — pure contention with the
+# co-resident trainers. Cap in code; no env needed.
+torch.set_num_threads(8)
+
 
 import os as _o
 _LAB = _o.path.expanduser("~") + "/chess-lab"
@@ -298,14 +303,20 @@ class FlyCB(torch.nn.Module):
             _prev = None
             for _ in range(max_steps):
                 a = (1 - LEAK) * a + LEAK * (self.WT @ a)
-                if os.environ.get("ANORM", "0") == "1":
+                if os.environ.get("ANORM", "1") == "1":
                     a = a / (a.abs().mean() + 1e-6)                         * float(os.environ.get("ANORM_T", "2.0"))
                 else:
                     a = torch.clamp(a, -CAP, CAP)
-                if _prev is not None and float(
+                # convergence check every 4th step only: float() here is a
+                # GPU->CPU sync that stalled the pipeline once per step per
+                # board (~4ms/board -> 10K rows/min gate). The iteration is
+                # contractive (leaky + renorm), so up to 3 extra steps past
+                # convergence are fixed-point no-ops.
+                if _ % 4 == 3 and _prev is not None and float(
                         (a - _prev).abs().mean()) < eps:
                     break
-                _prev = a
+                if _ % 4 == 3:
+                    _prev = a
             return a
         w = self.W_sens.weight * self.wmask if self.wmask is not None \
             else self.W_sens.weight
@@ -318,7 +329,7 @@ class FlyCB(torch.nn.Module):
         _prev = None
         for _ in range(max_steps):
             a = (1 - LEAK) * a + LEAK * (self.WT @ a)
-            if os.environ.get("ANORM", "0") == "1":
+            if os.environ.get("ANORM", "1") == "1":
                 a = a / (a.abs().mean() + 1e-6)                     * float(os.environ.get("ANORM_T", "2.0"))
             else:
                 a = torch.clamp(a, -CAP, CAP)
@@ -409,9 +420,17 @@ def make_board(rng, pieces):
 
 def gen_stage(rng, stage, batch, piece=None):
     """Yield list of (canonical_board, spec): leg_sq, target_mv, cls."""
-    if stage in (2, 3) and isinstance(piece, str):
+    if isinstance(piece, str):
         piece = {"ep": chess.PAWN, "promo": chess.PAWN,
-                 "castle": chess.KING}[piece]
+                 "castle": chess.KING}.get(piece)
+        if piece is None:
+            # movement pieces resolve to enums; unknown strings (the
+            # stage-4 mode names their_king/pin/fork/discovered) pass
+            # through to the mode switch below
+            try:
+                piece = getattr(chess, piece.upper())
+            except AttributeError:
+                pass
     out = []
     while len(out) < batch:
         spec = {}
@@ -905,6 +924,17 @@ def forward(model, fvb, slotb, pcrowb, mfb, maskb, pseudob=None,
 HARD_SLOT_W = {}                       # (from,to) -> weight boost
 
 
+def battery_activations(model, boards_specs):
+    """ONE battery prologue: feature-stack + propagate (+ leg_sq reach).
+    Replaces the copy in every eval."""
+    fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
+    reach = np.stack([reach_map(b, spec.get("leg_sq"))
+                      for b, spec in boards_specs]) \
+        if boards_specs else np.zeros((0, 64), np.float32)
+    with torch.no_grad():
+        return model.propagate(fvb, reach=reach)
+
+
 def make_score_ctx(model):
     """Detached per-model constants for the scalar readout. ONE copy —
     the four hand-rolled scorers this replaces had drifted term sets
@@ -931,19 +961,24 @@ def score_terms(ctx, theta_val, act_val, geo_val, mf, wpc,
 
 
 def repair_until(eval_fn, train_fn, rng_fn, bar=0.98, rounds=3,
-                 steps0=300):
+                 steps0=300, interleave_fn=None):
     """The escalation-repair loop (300->600->1200 ...), single-sourced:
-    it appeared copied six times across the stage-4/5 sweeps. Returns
-    (score, failures, rounds_used)."""
+    it appeared copied six times across the stage-4/5 sweeps. interleave_fn
+    runs after each repair round (the operator's hold-the-newest law).
+    Returns (score, failures, repair_rounds_executed)."""
     pr, fails = eval_fn()
     steps = steps0
+    done = 0
     for rnd in range(rounds):
         if pr >= bar:
             break
         train_fn(steps, rng_fn(rnd))
+        if interleave_fn is not None:
+            interleave_fn(steps, rng_fn(rnd))
+        done += 1
         pr, fails = eval_fn()
         steps *= 2
-    return pr, fails, rounds
+    return pr, fails, done
 
 
 
@@ -1070,12 +1105,7 @@ def eval_piece(model, piece, n=64, seed=5000, stage=1):
     illegal slot outscores the legal one."""
     rng = random.Random(seed + _phash(piece) + stage * 7919)
     boards_specs = gen_stage(rng, stage, n, piece=piece)
-    fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
-    reach = np.stack([reach_map(b, spec.get("leg_sq"))
-                      for b, spec in boards_specs]) \
-        if boards_specs else np.zeros((0, 64), np.float32)
-    with torch.no_grad():
-        a = model.propagate(fvb, reach=reach)
+    a = battery_activations(model, boards_specs)
     ok = tot = top_ok = 0
     failures = []
     geo = model.geo_w(model.slot_geo).squeeze(-1).detach().cpu().numpy()
@@ -1378,12 +1408,7 @@ def eval_ce(model, mode, n=96, seed=7000, stage=4):
     """CE-mode battery: argmax over legal moves must pick target_mv."""
     rng = random.Random(seed + _phash(mode or "mate1") % 9973)
     boards_specs = gen_stage(rng, stage, n, piece=mode)
-    fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
-    reach = np.stack([reach_map(b, spec.get("leg_sq"))
-                      for b, spec in boards_specs]) \
-        if boards_specs else np.zeros((0, 64), np.float32)
-    with torch.no_grad():
-        a = model.propagate(fvb, reach=reach)
+    a = battery_activations(model, boards_specs)
     geo = model.geo_w(model.slot_geo).squeeze(-1).detach().cpu().numpy()
     ok = tot = 0
     failures = []
@@ -1475,16 +1500,12 @@ def milestone_stage4(model, opt):
                 blocked = None
                 for st in (1, 2, 3):
                     for p2 in PIECE_ORDER:
-                        pr, fails = eval_piece(model, p2, n=64, stage=st)
-                        steps = 300
-                        for rnd in range(3):
-                            if pr >= 0.98:
-                                break
-                            train_stage(model, opt, st, steps,
-                                        random.Random(9500 + st * 31 + _phash(p2) + rnd),
-                                        piece=p2)
-                            pr, fails = eval_piece(model, p2, n=64, stage=st)
-                            steps *= 2
+                        pr, fails, _ = repair_until(
+                            lambda: eval_piece(model, p2, n=64, stage=st),
+                            lambda stp, sd: train_stage(
+                                model, opt, st, stp,
+                                random.Random(sd), piece=p2),
+                            lambda rnd: 9500 + st * 31 + _phash(p2) + rnd)
                         if pr < 0.98:
                             if pr >= 0.975:
                                 print(f"  MARGINAL s{st}:{pname(p2)} "
@@ -1494,16 +1515,11 @@ def milestone_stage4(model, opt):
                                            pr, fails)
                         parts.append(f"s{st}:{pname(p2)}={round(pr, 3)}")
                 for m2 in S4_MODES[:S4_MODES.index(mode) + 1]:
-                    pr, fails = eval_mode(m2, n=64)
-                    steps = 300
-                    for rnd in range(3):
-                        if pr >= 0.98:
-                            break
-                        train_stage(model, opt, 4, steps,
-                                    random.Random(9700 + _phash(m2) + rnd),
-                                    piece=m2)
-                        pr, fails = eval_mode(m2, n=64)
-                        steps *= 2
+                    pr, fails, _ = repair_until(
+                        lambda: eval_mode(m2, n=64),
+                        lambda stp, sd: train_stage(
+                            model, opt, 4, stp, random.Random(sd), piece=m2),
+                        lambda rnd: 9700 + _phash(m2) + rnd)
                     if pr < 0.98:
                         if pr >= 0.975:
                             print(f"  MARGINAL s4:{m2} accepted at "
@@ -1561,12 +1577,6 @@ def milestone_stage5(model, opt):
         return eval_ce(model, None, n=n,
                        seed=7000 + _phash("mate1_held") % 9973, stage=5)
 
-    def _repair_interleave(train_call, steps, seed):
-        # operator interleaving law: fixing older datasets must retrain the
-        # newest concept with ~20% of the turns, or the fixups erode it
-        train_call(steps, seed)
-        train_stage(model, opt, 5, max(1, steps // 4),
-                    random.Random(seed + 77))
 
     print("=== S5 MILESTONE mate1 ===", flush=True)
     rng = random.Random(9000 + _phash("mate1") % 104729)
@@ -1605,24 +1615,17 @@ def milestone_stage5(model, opt):
             repairs = 0
             for st in (1, 2, 3):
                 for p2 in PIECE_ORDER:
-                    pr, fails = eval_piece(model, p2, n=64, stage=st)
-                    steps = 300
-                    for rnd in range(3):
-                        if pr >= 0.98:
-                            break
-                        repairs += 1
-                        _sd = 9500 + st * 31 + _phash(p2) + rnd
+                    def _il_s123(stp, sd):
                         if eval_held(n=64)[0] < 0.98:
-                            _repair_interleave(
-                                lambda stp, sd, _st=st, _p=p2: train_stage(
-                                    model, opt, _st, stp,
-                                    random.Random(sd), piece=_p),
-                                steps, _sd)
-                        else:
-                            train_stage(model, opt, st, steps,
-                                        random.Random(_sd), piece=p2)
-                        pr, fails = eval_piece(model, p2, n=64, stage=st)
-                        steps *= 2
+                            focus_turns(model, opt, 5, stp, sd)
+                    pr, fails, nrep = repair_until(
+                        lambda: eval_piece(model, p2, n=64, stage=st),
+                        lambda stp, sd: train_stage(
+                            model, opt, st, stp, random.Random(sd),
+                            piece=p2),
+                        lambda rnd: 9500 + st * 31 + _phash(p2) + rnd,
+                        interleave_fn=_il_s123)
+                    repairs += nrep
                     if pr < 0.98:
                         if pr >= 0.975:
                             print(f"  MARGINAL s{st}:{pname(p2)} "
@@ -1637,28 +1640,23 @@ def milestone_stage5(model, opt):
                     pr, fails = eval_piece_boards(model, ebs)
                 else:
                     pr, fails = eval_ce(model, m2, n=64)
-                steps = 300
-                for rnd in range(3):
-                    if pr >= 0.98:
-                        break
-                    repairs += 1
-                    _sd = 9700 + _phash(m2) + rnd
+                def _ev_m2(_m=m2):
+                    if _m in ("their_king", "pin"):
+                        erng = random.Random(8000 + _phash(_m) % 7919)
+                        return eval_piece_boards(
+                            model, gen_stage(erng, 4, 64, piece=_m))
+                    return eval_ce(model, _m, n=64)
+
+                def _il_m2(stp, sd):
                     if eval_held(n=64)[0] < 0.98:
-                        _repair_interleave(
-                            lambda stp, sd, _m=m2: train_stage(
-                                model, opt, 4, stp, random.Random(sd),
-                                piece=_m),
-                            steps, _sd)
-                    else:
-                        train_stage(model, opt, 4, steps,
-                                    random.Random(_sd), piece=m2)
-                    if m2 in ("their_king", "pin"):
-                        erng = random.Random(8000 + _phash(m2) % 7919)
-                        ebs = gen_stage(erng, 4, 64, piece=m2)
-                        pr, fails = eval_piece_boards(model, ebs)
-                    else:
-                        pr, fails = eval_ce(model, m2, n=64)
-                    steps *= 2
+                        focus_turns(model, opt, 5, stp, sd)
+                pr, fails, nrep = repair_until(
+                    _ev_m2,
+                    lambda stp, sd: train_stage(
+                        model, opt, 4, stp, random.Random(sd), piece=m2),
+                    lambda rnd: 9700 + _phash(m2) + rnd,
+                    interleave_fn=_il_m2)
+                repairs += nrep
                 if pr < 0.98:
                     if pr >= 0.975:
                         print(f"  MARGINAL s4:{m2} accepted at "
@@ -1667,16 +1665,12 @@ def milestone_stage5(model, opt):
                         blocked = (f"s4:{m2}", pr, fails)
                 parts.append(f"s4:{m2}={round(pr, 3)}")
             # hold the new set: retrain it if the repairs pulled it below
-            pr5, _ = eval_held(n=64)
-            steps = 300
-            for rnd in range(3):
-                if pr5 >= 0.98:
-                    break
-                repairs += 1
-                train_stage(model, opt, 5, steps,
-                            random.Random(9800 + _phash("mate1") + rnd))
-                pr5, _ = eval_held(n=64)
-                steps *= 2
+            pr5, _, nrep5 = repair_until(
+                lambda: eval_held(n=64),
+                lambda stp, sd: train_stage(model, opt, 5, stp,
+                                            random.Random(sd)),
+                lambda rnd: 9800 + _phash("mate1") + rnd)
+            repairs += nrep5
             if pr5 < 0.98:
                 if pr5 >= 0.975:
                     print(f"  MARGINAL s5:mate1 accepted at "
@@ -1711,12 +1705,7 @@ def milestone_stage5(model, opt):
 
 def eval_piece_boards(model, boards_specs):
     """Pairwise legality eval over a pre-built battery (leg_sq specs)."""
-    fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b, _ in boards_specs])
-    reach = np.stack([reach_map(b, spec.get("leg_sq"))
-                      for b, spec in boards_specs]) \
-        if boards_specs else np.zeros((0, 64), np.float32)
-    with torch.no_grad():
-        a = model.propagate(fvb, reach=reach)
+    a = battery_activations(model, boards_specs)
     geo = model.geo_w(model.slot_geo).squeeze(-1).detach().cpu().numpy()
     ctx = make_score_ctx(model)
     wmv = ctx["wmv"]
@@ -1916,15 +1905,94 @@ def milestone_stage1(model, opt):
     return True
 
 
+# ---------------- the curriculum engine (ONE implementation) ----------------
+# operator law: no per-stage code logic. Stages are POOL REGISTRIES +
+# HOLDOUT registries; this engine is the only trainer loop. The scorer is
+# forward()/score_terms (single source), the gate is gate_pool_rows, the
+# maintenance is the operator interleave law (hold everything >= 0.98,
+# interleave ~20% of turns on the focus while it is below floor).
+
+def focus_turns(model, opt, focus_stage, steps, seed):
+    """THE operator interleaving law (one primitive): fixing older
+    datasets must retrain the newest concept with ~20% of the turns."""
+    train_stage(model, opt, focus_stage, max(1, steps // 4),
+                random.Random(seed + 77))
+
+
+HOLD_EVALS = {}          # name -> (eval_fn, repair_fn)
+
+
+def hold_eval_fns():
+    """Register the holdout batteries once: mate1 + s4 modes + movement
+    spots. All route through the canonical scorer already."""
+    if HOLD_EVALS:
+        return HOLD_EVALS
+    HOLD_EVALS["s5:mate1"] = (
+        lambda m: eval_ce(m, None, n=64,
+                          seed=7000 + _phash("mate1_held") % 9973, stage=5),
+        lambda m, o, steps, seed: train_stage(
+            m, o, 5, steps, random.Random(seed)))
+    for mode in S4_MODES:
+        if mode in ("their_king", "pin"):
+            def _ev(m, _md=mode):
+                erng = random.Random(8000 + _phash(_md) % 7919)
+                return eval_piece_boards(
+                    m, gen_stage(erng, 4, 64, piece=_md))
+        else:
+            def _ev(m, _md=mode):
+                return eval_ce(m, _md, n=64)
+        HOLD_EVALS[f"s4:{mode}"] = (
+            _ev, lambda m, o, steps, seed, _md=mode: train_stage(
+                m, o, 4, steps, random.Random(seed), piece=_md))
+    for st in (1, 2, 3):
+        for pc in ("knight", "pawn", "king"):
+            HOLD_EVALS[f"s{st}:{pc}"] = (
+                lambda m, _st=st, _pc=pc: eval_piece(
+                    m, _pc, n=48, stage=_st),
+                lambda m, o, steps, seed, _st=st, _pc=pc: train_stage(
+                    m, o, _st, steps, random.Random(seed), piece=_pc))
+    return HOLD_EVALS
+
+
+def maintain_holdouts(model, opt, rng, focus_below_floor=True,
+                      focus_fn=None):
+    """THE maintenance law (one implementation, used by every stage):
+    every registered holdout below 0.98 gets repaired; while the focus is
+    below its floor, ~20% of the repair turns stay on the focus.
+    focus_fn = the CALLER's focus trainer (stage 6 trains via tb_step on
+    pool rows — train_stage(stage=6) has no generator and crashes)."""
+    fns = hold_eval_fns()
+    held = {}
+    for name, (ev, rep) in fns.items():
+        def _il(stp, sd):
+            if focus_below_floor and focus_fn is not None:
+                focus_fn(stp, sd)
+        pr, _, _ = repair_until(
+            lambda: ev(model),
+            lambda stp, sd: rep(model, opt, stp, sd),
+            lambda rnd: 9900 + _phash(name) + rnd,
+            interleave_fn=_il)
+        held[name] = round(pr, 3)
+    return held
+
+
 def main_tb(steps):
     """Stage 6: exact tablebase endings, graded move-value training."""
-    rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP",
-                       "KQvKB", "KQvKN", "KQvKP", "KQvKR",
-                       "KRPvKR", "KRvKB", "KRvKN", "KRvKP", "KRvKR",
-                       "DEGM_Ch1", "DEGM_Ch2", "DEGM_Ch3", "DEGM_Ch4",
-                       "DEGM_Ch5", "DEGM_Ch6", "DEGM_Ch7", "DEGM_Ch8",
-                       "DEGM_Ch9", "DEGM_Ch10", "DEGM_Ch11", "DEGM_Ch12",
-                       "DEGM_Ch13", "DEGM_Ch14", "DEGM_Ch15"])
+    # operator order 2026-09-19: DEGM chapters BEFORE the deep-technique
+    # cores — the four cores (KQvKR/KRPvKR/KRvKR/KQvKP) are parked until
+    # the book chapters pass; solved TB families stay as 5% replay.
+    # DEGM_ONLY=1 (operator experiment): a BRAND-NEW fly trained on the
+    # book chapters ALONE — the capacity-vs-interference control.
+    if os.environ.get("DEGM_ONLY", "0") == "1":
+        rows = load_pools([f"DEGM_Ch{i}" for i in range(1, 16)])
+    else:
+        rows = load_pools(["KPvK", "KQvK", "KRvK", "KPvKP",
+                           "KQvKB", "KQvKN",
+                           "KRvKB", "KRvKN", "KRvKP",
+                           "DEGM_Ch1", "DEGM_Ch2", "DEGM_Ch3", "DEGM_Ch4",
+                           "DEGM_Ch5", "DEGM_Ch6", "DEGM_Ch7", "DEGM_Ch8",
+                           "DEGM_Ch9", "DEGM_Ch10", "DEGM_Ch11", "DEGM_Ch12",
+                           "DEGM_Ch13", "DEGM_Ch14", "DEGM_Ch15"])
     torch.manual_seed(0)                     # deterministic init + selection
     flyfeat_cb.feat_vec(chess.Board())
     retino_mode = os.environ.get("RETINO", "")
@@ -1987,25 +2055,64 @@ def main_tb(steps):
     rng = random.Random(6000)
     t0 = time.time()
     step = 0
+    block = 0
     while True:
         for _ in range(500):
             step += 1
             l = tb_step(model, opt, rows, rng)
+        block += 1
+        # the maintenance law, at a cadence that doesn't starve the focus:
+        # every 5 blocks (2500 focus steps). The every-block cascade spent
+        # ~90% of compute repairing and the four zero-cores never trained.
+        def _tb_focus(stp, sd):
+            frng = random.Random(sd)
+            for _ in range(max(1, stp // 4)):
+                tb_step(model, opt, rows, frng)
+        held = (None if os.environ.get("DEGM_ONLY", "0") == "1" else
+                (maintain_holdouts(model, opt, rng,
+                                   focus_below_floor=True,
+                                   focus_fn=_tb_focus)
+                 if block % 5 == 0 else None))
+        worst_held = min(held.values()) if held else 1.0
         torch.save(model.state_dict(), STATE + ".tmp")
         os.replace(STATE + ".tmp", STATE)
-        pair_gate, top, fam = gate_tb(model, rows, random.Random(777))
+        # EXHAUSTIVE every gate (operator ruling: no sampled telemetry,
+        # no 'effectively exhaustive'): 100% of every pool, every block
+        pair_gate, top, fam = gate_tb(model, rows, random.Random(777),
+                                      exhaustive=True)
         worst = min(fam.values()) if fam else 0.0
+        FAM_SCORE.update(fam)
         rec = {"stage": 6, "step": step, "loss": round(l, 4),
                "opt_set": round(pair_gate, 4), "worst_fam": worst,
-               "pass": bool(pair_gate >= 0.98 and worst >= 0.98)}
+               "worst_held": worst_held,
+               "pass": bool(pair_gate >= 0.98 and worst >= 0.98
+                            and worst_held >= 0.98)}
         print(json.dumps(rec), flush=True)
         print("S6 FAM " + " ".join(f"{k}={v}" for k, v in fam.items()),
               flush=True)
+        if held is not None:
+            print("S6 HELD " + " ".join(f"{k}={v}"
+                                        for k, v in held.items()),
+                  flush=True)
         with open(LOGF, "a") as f:
             f.write(json.dumps(rec) + "\n")
         if rec["pass"]:
-            print("STAGE 6 PASSED — tablebase endings internalized", flush=True)
-            break
+            # option (b): a pass CLAIM requires the exhaustive sweep —
+            # sampled 1.0 is telemetry, not evidence
+            print("S6 EXHAUSTIVE VERIFICATION SWEEP", flush=True)
+            xg, xt, xfam = gate_tb(model, rows, random.Random(999),
+                                   exhaustive=True)
+            xw = min(xfam.values()) if xfam else 0.0
+            print("S6 FAM-X " + " ".join(f"{k}={v}"
+                                         for k, v in xfam.items()),
+                  flush=True)
+            if xg >= 0.98 and xw >= 0.98 and worst_held >= 0.98:
+                print("STAGE 6 PASSED (exhaustive) — tablebase endings "
+                      "internalized, prior concepts held", flush=True)
+                break
+            FAM_SCORE.update(xfam)
+            print(f"S6 EXHAUSTIVE-REJECT overall={xg:.4f} worst={xw:.3f} "
+                  f"failrows={len(FAIL_FENS)}", flush=True)
 
 # ---------------- stage 6: tablebase-graded endings ----------------
 # operator rule: reinforce the best move, but grade every move by its state
@@ -2025,10 +2132,15 @@ def load_pools(names):
     rows = []
     for nm in names:
         for p in _g.glob(f"{POOL_DIR}/{nm}.jsonl"):
+            pre = None
+            if os.path.exists(p.replace(".jsonl", ".pre.npz")):
+                pre = np.load(p.replace(".jsonl", ".pre.npz"),
+                              allow_pickle=True)
             with open(p) as f:
-                for line in f:
+                for ri, line in enumerate(f):
                     try:
-                        rows.append(dict(json.loads(line), pool=nm))
+                        rows.append(dict(json.loads(line), pool=nm,
+                                         _pre=(pre, ri)))
                     except Exception:
                         pass
     print(f"pools {names}: {len(rows)} exact-labeled positions", flush=True)
@@ -2079,7 +2191,7 @@ def graded_targets(entry, b):
     else:                                      # lost: resist longest
         for u, (o, d) in child_ours.items():
             if o == "win":
-                vals[u] = -1.0 + min(d, 100) / 250.0
+                vals[u] = -1.0 + min(d or 50, 100) / 250.0
             elif o == "draw":
                 vals[u] = 0.4                  # salvation draw
             else:
@@ -2087,10 +2199,24 @@ def graded_targets(entry, b):
     return vals
 
 
+FAM_SCORE = {}              # pool -> last gate score (weighted sampling)
+
+
 def build_tb_batch(rng, rows, batch):
     buf = []
+    pools = [e.get("pool", "?") for e in rows]
+    wts = [max(0.05, 1.0 - FAM_SCORE.get(pl, 0.0)) for pl in pools]
+    import bisect
+    cum = []
+    t = 0.0
+    for w in wts:
+        t += w
+        cum.append(t)
+    def pick():
+        r = rng.random() * t
+        return rows[bisect.bisect_left(cum, r)]
     while len(buf) < batch:
-        e = rows[rng.randrange(len(rows))]
+        e = pick()
         try:
             b = chess.Board(e["fen"])
             if b.is_game_over():
@@ -2103,6 +2229,35 @@ def build_tb_batch(rng, rows, batch):
     slots = []
     tgts = []
     clb = np.array([CLS_MAP.get(e["cat"], 1) for _, e in buf], dtype=np.int64)
+    if all(e.get("_pre") is not None and e["_pre"][0] is not None
+           for _, e in buf):
+        # PRECOMPUTED PATH (operator ruling: training and playback
+        # aligned): slot/pcrow/mf/pseudo/threat from the packed arrays;
+        # graded values via graded_targets (dict work only, no boards)
+        pres = [e["_pre"] for _, e in buf]
+        fvb = np.stack([flyfeat_cb.feat_vec_by_fen(e["fen"])
+                        for _, e in buf])
+        sl = [(int(P["fen_off"][ri]), int(P["fen_off"][ri + 1]))
+              for P, ri in pres]
+        slots, tg2, rich = [], [], []
+        for i, ((b, e), (a, b2)) in enumerate(zip(buf, sl)):
+            P, ri = e["_pre"]
+            L = b2 - a
+            tv = graded_targets(e, b)
+            sv = P["slot"][a:b2].astype(np.int64)
+            vv = np.zeros(L, dtype=np.float32)
+            vm = np.zeros(L, dtype=bool)
+            for j, mv in enumerate(b.legal_moves):
+                uci = mv.uci()
+                vv[j] = tv.get(uci, 0.0)
+                vm[j] = uci in tv
+            slots.append((sv, vv, vm))
+            bi = int(P["best_idx"][ri])
+            tg2.append(bi if bi >= 0 else -1)
+            rich.append((P["mf"][a:b2], P["pseudo"][a:b2],
+                         P["pseudo2"][a:b2], P["threat"][a:b2],
+                         P["pcrow"][a:b2]))
+        return fvb, slots, tg2, torch.from_numpy(clb).to(DEV), rich
     for b, e in buf:
         mvs = list(b.legal_moves)
         ch = e.get("children", {})
@@ -2196,79 +2351,149 @@ def loss_cls_term(cls, cl):
     return torch.nn.functional.cross_entropy(cls, cl)
 
 
-def gate_tb(model, rows, rng):
-    """Gate: argmax(value head) ∈ optimal-move set on held-out entries."""
+FAIL_FENS = set()              # exhaustive-sweep failures -> retraining
+
+
+def gate_tb(model, rows, rng, exhaustive=False):
+    """Gate (option b): sampled n=150/pool telemetry; exhaustive=True
+    sweeps 100% of every pool — the only basis for a pass claim — and
+    collects failing fens. Boards are BATCHED (one propagate + one
+    forward per chunk): the per-board path cost a GPU sync per settling
+    step and capped at ~170 rows/s."""
     model.eval()
     ok = tot = 0
     fam = {}
+    fails = {}
+    by_pool = {}
+    for e in rows:
+        by_pool.setdefault(e.get("pool", "?"), []).append(e)
+    CH = 2048
     with torch.no_grad():
-        for _ in range(400):
-            e = rows[rng.randrange(len(rows))]
-            pn = e.get("pool", "?")
+        for pn, prows in by_pool.items():
             fst = fam.setdefault(pn, [0, 0])
-            try:
-                b = chess.Board(e["fen"])
-            except Exception:
+            fails[pn] = []
+            todo = (prows if exhaustive
+                    else [prows[rng.randrange(len(prows))]
+                          for _ in range(150)])
+            for ci in range(0, len(todo), CH):
+                chunk = [e for e in todo[ci:ci + CH]
+                         if e.get("_pre") is not None
+                         and e["_pre"][0] is not None]
+                if not chunk:
+                    continue
+                # PRECOMPUTED PATH: slice packed arrays; no board objects
+                pres = [e["_pre"] for e in chunk]
+                fens = [e["fen"] for e in chunk]
+                sl = [(int(P["fen_off"][ri]), int(P["fen_off"][ri + 1]))
+                      for P, ri in pres]
+                Bn = len(chunk)
+                M = max(b - a for a, b in sl)
+                P0 = pres[0][0]
+                F = P0["mf"].shape[1]
+                fvb = np.stack([flyfeat_cb.feat_vec_by_fen(f)
+                                for f in fens]) \
+                    if hasattr(flyfeat_cb, "feat_vec_by_fen") else \
+                    np.stack([flyfeat_cb.feat_vec(chess.Board(f))[0]
+                              for f in fens])
+                slotb = np.zeros((Bn, M), dtype=np.int64)
+                pcrowb = np.zeros((Bn, M), dtype=np.int64)
+                mfb = np.zeros((Bn, M, F), dtype=np.float32)
+                maskb = np.zeros((Bn, M), dtype=bool)
+                pseudob = np.zeros((Bn, M), dtype=np.float32)
+                pseudo2b = np.zeros((Bn, M), dtype=np.float32)
+                threatb = np.zeros((Bn, M), dtype=np.float32)
+                for i, ((a, b2), (P, ri)) in enumerate(zip(sl, pres)):
+                    L = b2 - a
+                    slotb[i, :L] = P["slot"][a:b2]
+                    pcrowb[i, :L] = P["pcrow"][a:b2]
+                    mfb[i, :L] = P["mf"][a:b2]
+                    maskb[i, :L] = True
+                    pseudob[i, :L] = P["pseudo"][a:b2]
+                    pseudo2b[i, :L] = P["pseudo2"][a:b2]
+                    threatb[i, :L] = P["threat"][a:b2]
+                T, logp, T_all, clsg = forward(model, fvb, slotb, pcrowb,
+                                               mfb, maskb, pseudob,
+                                               threatb, pseudo2b)
+                picks = torch.argmax(T, dim=1).tolist()
+                for i, e in enumerate(chunk):
+                    P, ri = e["_pre"]
+                    a, b2 = sl[i]
+                    pick = int(picks[i])
+                    o = float(P["opt"][a + pick]) if pick < (b2 - a) \
+                        else 0.0
+                    tot += 1
+                    fst[1] += 1
+                    hit = o > 0.5
+                    fst[0] += int(hit)
+                    ok += int(hit)
+                    if not hit and exhaustive:
+                        FAIL_FENS.add(e["fen"])
                 continue
-            if b.is_game_over():
-                continue
-            mvs = list(b.legal_moves)
-            if not mvs:
-                continue
-            fv, _ = flyfeat_cb.feat_vec(b)
-            a = model.propagate(fv[None, :])
-            s = torch.tensor([m.from_square * 64 + m.to_square
-                              for m in mvs], device=DEV)
-            # the gate MIRRORS the canonical forward() scorer — same
-            # single source of truth as the training step
-            Mv = len(mvs)
-            slotb = np.array([m.from_square * 64 + m.to_square
-                              for m in mvs], dtype=np.int64)[None, :]
-            pcrowb = np.array(
-                [_PC_IDX[b.piece_at(m.from_square).piece_type]
-                 if b.piece_at(m.from_square) else 0 for m in mvs],
-                dtype=np.int64)[None, :]
-            mfb = np.stack([flyfeat_cb.move_feats(b, mv)
-                            for mv in mvs])[None, :, :]
-            maskb = np.ones((1, Mv), dtype=bool)
-            p2 = {(pm.from_square, pm.to_square)
-                  for pm in b.pseudo_legal_moves}
-            pseudob = np.array(
-                [[1.0 if (b.attacks_mask(m.from_square)
-                          & chess.BB_SQUARES[m.to_square]) else 0.0
-                  for m in mvs]], dtype=np.float32)
-            pseudo2b = np.array(
-                [[1.0 if (m.from_square, m.to_square) in p2 else 0.0
-                  for m in mvs]], dtype=np.float32)
-            thrb = []
-            for mv in mvs:
-                b.push(mv)
-                thrb.append(min(bin(b.attacks_mask(mv.to_square)
-                                    & b.occupied_co[b.turn]).count("1"),
-                                4) / 4.0)
-                b.pop()
-            threatb = np.array([thrb], dtype=np.float32)
-            T, logp, T_all, clsg = forward(model, fv[None, :], slotb,
-                                           pcrowb, mfb, maskb,
-                                           pseudob, threatb, pseudo2b)
-            pick = mvs[int(torch.argmax(T[0]))]
-            # optimal set: moves whose child category preserves the outcome
-            ch = e.get("children", {})
-            opt = {"win": "loss", "cursed_win": "loss", "draw": "draw",
-                   "cursed_loss": "win", "loss": "win"}[e["cat"]]
-            optset = {u for u, c in ch.items()
-                      if {"win": "loss", "loss": "win", "draw": "draw",
-                          "cursed_win": "cursed_loss",
-                          "cursed_loss": "cursed_win"}.get(c.get("cat")) == opt}
-            tot += 1
-            fst[1] += 1
-            fst[0] += int(pick.uci() in optset)
-            ok += int(pick.uci() in optset)
+                boards, keep = [], []
+                Bn = len(keep)
+                M = max(len(mv) for _, mv in keep)
+                F = flyfeat_cb.move_feats(keep[0][1][0]).shape[0]
+                fvb = np.stack([flyfeat_cb.feat_vec(b)[0] for b in boards])
+                slotb = np.zeros((Bn, M), dtype=np.int64)
+                pcrowb = np.zeros((Bn, M), dtype=np.int64)
+                mfb = np.zeros((Bn, M, F), dtype=np.float32)
+                maskb = np.zeros((Bn, M), dtype=bool)
+                pseudob = np.zeros((Bn, M), dtype=np.float32)
+                pseudo2b = np.zeros((Bn, M), dtype=np.float32)
+                threatb = np.zeros((Bn, M), dtype=np.float32)
+                for i, (e, mvs) in enumerate(keep):
+                    b = boards[i]
+                    p2 = {(pm.from_square, pm.to_square)
+                          for pm in b.pseudo_legal_moves}
+                    for j, mv in enumerate(mvs):
+                        slotb[i, j] = mv.from_square * 64 + mv.to_square
+                        pc = b.piece_at(mv.from_square)
+                        pcrowb[i, j] = _PC_IDX[pc.piece_type] if pc else 0
+                        mfb[i, j] = flyfeat_cb.move_feats(b, mv)
+                        maskb[i, j] = True
+                        pseudob[i, j] = 1.0 if (
+                            b.attacks_mask(mv.from_square)
+                            & chess.BB_SQUARES[mv.to_square]) else 0.0
+                        pseudo2b[i, j] = 1.0 if (mv.from_square,
+                                                 mv.to_square) in p2 else 0.0
+                        b.push(mv)
+                        threatb[i, j] = min(
+                            bin(b.attacks_mask(mv.to_square)
+                                & b.occupied_co[b.turn]).count("1"),
+                            4) / 4.0
+                        b.pop()
+                T, logp, T_all, clsg = forward(model, fvb, slotb, pcrowb,
+                                               mfb, maskb, pseudob,
+                                               threatb, pseudo2b)
+                picks = torch.argmax(T, dim=1).tolist()
+                for i, (e, mvs) in enumerate(keep):
+                    ch = e.get("children", {})
+                    opt = {"win": "loss", "cursed_win": "loss",
+                           "draw": "draw", "cursed_loss": "win",
+                           "loss": "win"}[e["cat"]]
+                    optset = {u for u, c in ch.items()
+                              if {"win": "loss", "loss": "win",
+                                  "draw": "draw",
+                                  "cursed_win": "cursed_loss",
+                                  "cursed_loss": "cursed_win"}.get(
+                                      c.get("cat")) == opt}
+                    pick = mvs[picks[i]].uci()
+                    tot += 1
+                    fst[1] += 1
+                    hit = pick in optset
+                    fst[0] += int(hit)
+                    ok += int(hit)
+                    if not hit:
+                        fails[pn].append(e["fen"])
     model.train()
     famtbl = {}
     for nm, (fok, ftot) in sorted(fam.items()):
         famtbl[nm] = round(fok / max(ftot, 1), 3)
+    if exhaustive:
+        FAIL_FENS.update(f for v in fails.values() for f in v)
     return ok / max(tot, 1), tot, famtbl
+
+
 
 
 def main():

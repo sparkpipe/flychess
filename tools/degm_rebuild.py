@@ -155,6 +155,11 @@ def grade_one(job):
     if tb_class is not None:
         cat = tb_class
         top = [u for u in cats if RANK[cats[u]] == RANK[cat]]
+        if not top:
+            # per-move probes missed the TB class (probe-edge cases):
+            # fall back to the best band any move actually achieved
+            bcat = max(cats.values(), key=lambda x: RANK[x])
+            top = [u for u in cats if RANK[cats[u]] == RANK[bcat]]
         if book_mv is not None and book_mv in top:
             best, authority = book_mv, "book+tb"
         else:

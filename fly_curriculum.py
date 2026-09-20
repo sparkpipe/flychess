@@ -2148,46 +2148,59 @@ def load_pools(names):
 
 
 def graded_targets(entry, b):
-    """Per-legal-move value targets, CATEGORICAL ONLY (operator ruling
-    2026-09-19: no TB-play training — DTZ pace, the 50-move cliff and
-    the resistance ladder are machine-perfect targets the fly cannot
-    learn naturally). A move's value is its outcome band, nothing more;
-    dtz fields in children are provenance, never targets."""
+    """Per-legal-move value targets, categorical + practical-play.
+
+    Children cats are stored from the PARENT MOVER's perspective (both
+    generators: SF multipv relative score, and TB wdl_cat(-wdl_child)).
+    The old ours() flip treated them as opponent-perspective — correct
+    for win/draw/loss by double-flip accident, INVERTED for the cursed
+    bands (book winning tries graded as collapses). Direct table below,
+    per operator ruling 2026-09-20: play to win without risk of loss is
+    a good strategy — a preserved practical win is a top value."""
     cat = entry["cat"]
     ch = entry.get("children", {})
-    # child category is from the OPPONENT's perspective; flip to ours
-    def ours(c):
-        return {"win": "loss", "loss": "win", "draw": "draw",
-                "cursed_win": "cursed_loss", "cursed_loss": "cursed_win"}[c]
     vals = {}
-    child_ours = {}
     for uci, c in ch.items():
-        cc = c.get("cat")
-        if cc is None:
+        s = c.get("cat")
+        if s is None:
             continue
-        child_ours[uci] = ours(cc)
-    if cat in ("win", "cursed_win"):
-        for u, o in child_ours.items():
-            if o == "loss":                     # keeps the win — flat 1.0
-                vals[u] = 1.0
-            elif o == "draw":
-                vals[u] = -0.6                  # lost the win
+        if cat in ("win", "cursed_win"):
+            if s in ("win", "cursed_win"):
+                vals[uci] = 1.0      # wins / keeps the practical win
+            elif s == "draw":
+                vals[uci] = -0.6     # win evaporated
+            elif s == "cursed_loss":
+                vals[uci] = -0.8     # practical collapse, drawable
             else:
-                vals[u] = -1.0                  # lost the game
-    elif cat == "draw":
-        for u, o in child_ours.items():
-            if o == "draw":
-                vals[u] = 0.6                   # hold the draw
+                vals[uci] = -1.0     # lost the game
+        elif cat == "draw":
+            if s in ("win", "cursed_win"):
+                vals[uci] = 1.0      # turnaround — opponent faltered
+            elif s == "draw":
+                vals[uci] = 0.6      # hold the draw
+            elif s == "cursed_loss":
+                vals[uci] = 0.4      # official draw, practical misery
             else:
-                vals[u] = -1.0                  # drifted into loss
-    else:                                       # lost: categorical only
-        for u, o in child_ours.items():
-            if o == "win":
-                vals[u] = -0.8                  # still lost — flat
-            elif o == "draw":
-                vals[u] = 0.4                   # salvation draw
+                vals[uci] = -1.0     # drifted into loss
+        elif cat == "cursed_loss":
+            if s in ("win", "cursed_win"):
+                vals[uci] = 1.0      # turnaround — we win
+            elif s == "cursed_loss":
+                vals[uci] = 0.6      # keep fighting: official draw intact,
+                                     # practical chances alive, no forced loss
+            elif s == "draw":
+                vals[uci] = 0.4      # settle the clean draw
             else:
-                vals[u] = 0.6                   # the key was wrong: we win
+                vals[uci] = -1.0     # fell into a real loss
+        else:                        # plain loss: categorical only
+            if s in ("win", "cursed_win"):
+                vals[uci] = 1.0      # turnaround (key was wrong / err)
+            elif s == "draw":
+                vals[uci] = 0.4      # salvation draw
+            elif s == "cursed_loss":
+                vals[uci] = -0.6     # practically lost, drawable
+            else:
+                vals[uci] = -0.8     # still lost — flat
     return vals
 
 
@@ -2460,15 +2473,16 @@ def gate_tb(model, rows, rng, exhaustive=False):
                 picks = torch.argmax(T, dim=1).tolist()
                 for i, (e, mvs) in enumerate(keep):
                     ch = e.get("children", {})
-                    opt = {"win": "loss", "cursed_win": "loss",
-                           "draw": "draw", "cursed_loss": "win",
-                           "loss": "win"}[e["cat"]]
-                    optset = {u for u, c in ch.items()
-                              if {"win": "loss", "loss": "win",
-                                  "draw": "draw",
-                                  "cursed_win": "cursed_loss",
-                                  "cursed_loss": "cursed_win"}.get(
-                                      c.get("cat")) == opt}
+                    # approved set (operator doctrine 2026-09-20): only a
+                    # move that actually LOSES is disapproved; keeping the
+                    # game alive — practical wins, cursed holds, draws —
+                    # is approved. In already-lost positions nothing is
+                    # disapproved. Children cats are parent-perspective.
+                    if e["cat"] == "loss":
+                        optset = set(ch)
+                    else:
+                        optset = {u for u, c in ch.items()
+                                  if c.get("cat") != "loss"}
                     pick = mvs[picks[i]].uci()
                     tot += 1
                     fst[1] += 1

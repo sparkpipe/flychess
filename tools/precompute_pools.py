@@ -58,9 +58,15 @@ def precompute(path):
         mvs = list(b.legal_moves)
         p2 = {(pm.from_square, pm.to_square) for pm in b.pseudo_legal_moves}
         ch = e.get("children", {})
-        optcat = {"win": "loss", "cursed_win": "loss", "draw": "draw",
-                  "cursed_loss": "win", "loss": "win"}[e["cat"]]
-        optset = {u for u, c in ch.items() if FLIP.get(c.get("cat")) == optcat}
+        # approved set (operator doctrine 2026-09-20): only a move that
+        # actually LOSES is disapproved; keeping the game alive —
+        # practical wins, cursed holds, draws — is approved. In
+        # already-lost positions nothing is disapproved. Children cats
+        # are parent-perspective.
+        if e["cat"] == "loss":
+            optset = set(ch)
+        else:
+            optset = {u for u, c in ch.items() if c.get("cat") != "loss"}
         bi = -1
         for j, mv in enumerate(mvs):
             u = mv.uci()

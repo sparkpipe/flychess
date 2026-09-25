@@ -91,6 +91,7 @@ def main():
     rngp = random.Random(9)      # same probes as stretch_search
     all_rows = [r for li in ids for r in rows_of[li]]
     probes = {}
+    borders = {}
     near_of = {}
     near_w = {}
     TAU = float(os.environ.get("TAU", "0.10"))
@@ -113,6 +114,23 @@ def main():
                 pr += rngp.sample(src, min(15, len(src)))
         pr += rngp.sample(all_rows, min(100, len(all_rows)))
         probes[li] = pr
+        # TILING: border strip per neighbor — j's 20 positions
+        # closest to i (feature cosine to i's centroid)
+        ci = np.mean(np.stack(
+            [flyfeat_cb.feat_vec_by_fen(r["fen"])
+             for r in rows_of[li]]), axis=0)
+        ci /= np.linalg.norm(ci) + 1e-9
+        bl = []
+        for nj in near:
+            jr = rows_of[nj]
+            if not jr:
+                continue
+            J = np.stack([flyfeat_cb.feat_vec_by_fen(r["fen"])
+                          for r in jr])
+            J /= np.linalg.norm(J, axis=1, keepdims=True) + 1e-9
+            order = np.argsort(-(J @ ci))[:20]
+            bl.append([jr[k] for k in order])
+        borders[li] = bl
 
     base = tp.build_model(0)
     base_sd = {k: v.detach().cpu().clone()
@@ -158,15 +176,29 @@ def main():
                     prb, _ = fc.gate_tb(model, probes[li],
                                         random.Random(777),
                                         exhaustive=True)
+                    bd = []
+                    for bl in borders[li]:
+                        if bl:
+                            b, _ = fc.gate_tb(model, bl,
+                                              random.Random(777),
+                                              exhaustive=True)
+                            bd.append(round(b, 4))
                     cands.append({"lam": lam, "step": step,
                                   "own": round(own, 4),
                                   "probe": round(prb, 4),
+                                  "borders": bd,
+                                  "min_border": min(bd) if bd else 0.0,
                                   "sd": {k: v.detach().cpu().clone()
                                          for k, v in
                                          model.state_dict().items()}})
         ok = [c for c in cands if c["own"] >= OWN_MIN]
-        chosen = max(ok or cands, key=lambda c: c["probe"]) \
-            if cands else None
+        # TILING selection: every border covered (max min_border),
+        # then mean probe, then EARLIEST step (least stretch that
+        # tiles)
+        def rank(c):
+            return (round(c["min_border"], 2), c["probe"],
+                    -c["step"])
+        chosen = max(ok or cands, key=rank) if cands else None
         if chosen is not None:
             model = tp.build_model(0)
             model.load_state_dict(chosen["sd"])

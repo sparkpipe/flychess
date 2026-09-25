@@ -13,8 +13,9 @@ import os
 import time
 from multiprocessing import Pool
 
-FENS = "/home/spec/chess-lab/gambit/fens.txt"
-OUTD = "/home/spec/chess-lab/gambit"
+FENS = os.environ.get("FENS_FILE",
+                      "/home/spec/chess-lab/gambit/fens.txt")
+OUTD = os.environ.get("GAMBIT_DIR", "/home/spec/chess-lab/gambit")
 WORKERS = 14
 BLOCK = 32
 os.makedirs(OUTD, exist_ok=True)
@@ -45,7 +46,8 @@ def worker(wid):
         line = proc.stdout.readline()
         if line.startswith("readyok"):
             break
-    outp = f"{OUTD}/evals_{wid}.txt"
+    _sfx = os.environ.get("FENS_SFX", "")
+    outp = f"{OUTD}/evals{_sfx}_{wid}.txt"
     t0 = time.time()
     n = 0
     with open(FENS, "rb") as f, open(outp, "w") as w:
@@ -108,9 +110,11 @@ def main():
     with Pool(WORKERS) as p:
         stats = p.map(worker, range(WORKERS))
     tot = sum(s["evals"] for s in stats)
-    with open(f"{OUTD}/evals.txt", "w") as out:
-        for i in range(WORKERS):
-            with open(f"{OUTD}/evals_{i}.txt") as f:
+    import glob as _gl
+    _all = sorted(_gl.glob(f"{OUTD}/evals{FENS_SFX}_[0-9]*.txt"))
+    with open(f"{OUTD}/evals{FENS_SFX}.txt", "w") as out:
+        for _f in _all:
+            with open(_f) as f:
                 while True:
                     b = f.read(1 << 24)
                     if not b:

@@ -56,6 +56,12 @@ def main():
             done.add(json.loads(line)["fen"])
     todo = [i for i, e in enumerate(rows)
             if e["fen"] not in done]
+    # multi-process partitioning: SWEEP_MOD=N SWEEP_REM=k -> this
+    # process only trains questions with gi % N == k
+    _mod = os.environ.get("SWEEP_MOD")
+    if _mod:
+        todo = [i for i in todo if i % int(_mod)
+                == int(os.environ.get("SWEEP_REM", "0"))]
     print(f"questions total={len(rows)} done={len(done)} "
           f"todo={len(todo)}", flush=True)
     t0 = time.time()

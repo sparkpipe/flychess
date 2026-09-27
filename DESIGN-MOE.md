@@ -46,15 +46,22 @@ Standing directives (violations are program-stopping):
 | 1 | **opening-gambit** | Early sacrificed or grabbed material; initiative-first play. Dataset ALREADY EXISTS (gambit pool mined from 94K matched games; initial-drop-of-a-pawn pattern). | game_ply < opening bound AND asymmetric material | existing gambit dataset + early-asymmetric segments |
 | 2 | **balanced** | Symmetric material, any pawn count, queens on or off, no listed confrontation. The locked-pawn closedness spectrum lives INSIDE this domain (see §5). | symmetric counts, no confrontation fired | balanced-config segments, all trajectories |
 | 3 | **piece-trades** | The trade decisions: positions with an equal-value capture available, and the exchange moves themselves (material-change boundaries). The expert in WHEN to trade. | equal-type or cross-minor capture available in non-endgame material [READING — ruling pending] | `exch`-tagged positions + pre-trade tension positions |
-| 4 | **mid-queenless** | Queens off, symmetric material, >10 men — queenless middlegame technique. Kept from the original 8-specialist design (corrections did not remove it). [confirm] | queens == 0, symmetric, no confrontation | queenless symmetric segments |
 | 5 | **endgame-dvoretsky** | Practical endgames, 6-10 men, not a listed confrontation. CONFIRMED by operator. | 6 <= men <= 10 (after confrontation table) | dvoretsky-region segments |
 | 6 | **endgame-tablebase** | Exact endgames, <=5 men. CONFIRMED. Syzygy-generated training data COMPLETE (exactly 5,000,000 positions in `tb_training.bin`). | men <= 5 — absolute, first check | syzygy data (done) |
 
-### 3.2 Tactics experts (UNBALANCED middlegames)
+### 3.2 Tactics expert (independent, puzzle-trained)
 
 | # | Expert | Description |
 |---|--------|-------------|
-| 7+ | **tactics family** | Middlegames with material imbalance inside substantial material (queens typically on) — the attacking/converting/defending unbalanced middlegame. This is the region the **piece-imbalance x eval-trajectory matrix** partitions: sub-buckets = matrix cells with mass (imbalance pattern x trajectory). Exact sub-bucket count and boundaries are DERIVED FROM THE FULL-DATA MATRIX and ruled before training. The matrix is the taxonomy — it was built for exactly this. |
+| 7 | **pure tactics** | ONE independent expert trained on the tactics puzzles (Lichess DB, 6.1M theme-tagged) — regardless of material balance, eval trajectory, phase. It only sees pure tactics. It exists OUTSIDE the MoE: see the dual-signal architecture (§2.1). Data: `/home/spec/chess-lab/puzzles/lichess_db_puzzle.csv`. |
+
+**Dual-signal player (operator ruling):** the structured-strategy MoE plays general-concept
+chess — eval slope improvement, slowly squeezing to checkmate — while the tactics player
+cares only about the immediate tactical win. At evaluation time: **first check for an
+immediate tactical win — if present, the tactics expert answers, done. If not, route the MoE.**
+Gate mechanism [READING — ruling pending]: the tactics net evaluates first; a decisive
+tactics-net eval (threshold = UCI option) means the shot is there; otherwise MoE routing.
+Threshold calibrated by ROC on labeled puzzle-vs-quiet positions before any match.
 
 ### 3.3 Material confrontation experts (operator's list, verbatim)
 
@@ -179,12 +186,15 @@ v1: one balanced net; C is reported in the matrix and available as a routing axi
 
 ## 8. Open questions for ruling (nothing proceeds on these without the operator)
 
-1. Tactics-family sub-buckets — from the full-data matrix (imbalance x trajectory cells with mass); proposal comes with the matrix numbers.
+1. Tactics gate: threshold calibration method (ROC on puzzle-vs-quiet labeled sets) and the training-target design for puzzle positions (decisive-win labeling) — proposal before packing.
 2. Confrontation matching: cancel-common + reduced-material-only reading (§3.3) — confirm or override.
-3. mid-queenless: kept as its own expert (per original 8) or folded into balanced?
-4. Balanced spectrum: one net (v1 recommendation, §5) vs split at calibrated quantiles.
-5. Starved-class folding (with mass numbers shown first).
-6. Opening-boundary ply value (from data; UCI option).
+3. Balanced spectrum: one net (v1 recommendation, §5) vs split at calibrated quantiles.
+4. Starved-class folding (with mass numbers shown first).
+5. Opening-boundary ply value (from data; UCI option).
+
+RESOLVED by ruling 2026-09-27: mid-queenless REMOVED (imbalance buckets + balanced handle
+queenless); tactics = one independent puzzle-trained expert outside the MoE (dual-signal,
+tactic-first gate).
 
 ## 9. Laws (accumulated, binding)
 

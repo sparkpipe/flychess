@@ -65,8 +65,9 @@ for line in open(sys.argv[1]):
             e = "dvoretsky"
         elif r["exch"]:
             e = "pieceTrades-approx"
-        elif r["ply"] < 24 and not symmetric:
-            e = "gambit-earlyasym"   # asymmetric early only (design §3.1)
+        # NOTE: no cascade-gambit branch. The gambit expert trains EXCLUSIVELY on
+        # the already-curated gambit pool (tbpools/GAMBIT.jsonl, operator-mined).
+        # Cascade re-derivation of gambit data is DEPRECATED (operator correction).
         else:
             e = "balanced"
             lk = r["lock_c"] if r["lock_c"] < 3 else 3

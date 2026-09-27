@@ -117,8 +117,9 @@ def assign(r):
         return "oppb", r["exch"]
     if men <= 10:
         return "dvoretsky", r["exch"]
-    if r["ply"] < 24 and not symmetric:
-        return "gambit", r["exch"]
+    if r["ply"] < 24 and (not symmetric
+                           or w.count("P") != b.count("P")):
+        return "gambit", r["exch"]   # pawn sac/grab early = gambit too
     lk = r["lock_c"] if r["lock_c"] < 3 else 3
     return "balanced_l%d" % lk, r["exch"]
 

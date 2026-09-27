@@ -177,32 +177,37 @@ sharding proceeds per ruling; C remains available as a smoothing/reporting axis.
   - Per-position: config, opp/same bishops, lock_c/lock_e/tension/open, men, phase.
 - **Trajectory classes** (W = 1/(1+exp(-cp/361))): press 55-70, convert 70-win, equalize
   45-55, defend 30-45, win 95+, collapse <30; segments classified start-band -> end-band.
-  - **EXCLUDE draw-to-draw ONLY** (equalize_to_equalize) — same-band classes like
-    win_to_win (converting) and collapse_to_collapse (fighting) are IN (verbatim ruling:
-    "but draw to draw, I don't want").
-  - **INCLUDE losing-game segments** (improving play is valuable).
+  - **SELECTION RULE (verbatim ruling):** the result of the game does not matter — we look
+    for **steady improvement of position**, regardless of where it started or what happened
+    in the game. "A 55% to 60% does not help us; a 40% to 55% does."
+    Qualifying segment = **upward band crossing** (end band higher than start band).
+    Same-band segments are ALL excluded (any band, either direction). Result-agnostic —
+    improving segments from losing sides and drawn games all qualify.
   - Eval slope EMA'd (ruling).
 - **The matrix**: (config x trajectory) with segments/ply counts — per-expert mass,
   cut-point calibration, starved-class detection.
 
 ### 6.1 Expert data census (partial data: 13,990,350 positions = 338K games = 22% of pool)
 
-| expert | trainable now | x4 projected (filtered dump) |
-|---|---|---|
-| balanced (all shards) | 2,527,153 | 10.1M |
-| gambit | 734,339 | 2.9M |
-| N vs B | 2,024,538 | 8.1M |
-| piece-trades | 1,588,720 | 6.4M |
-| dvoretsky | 437,766 | 1.75M |
-| opp-bishops | 364,233 | 1.46M |
-| B vs R | 332,736 | 1.33M |
-| N vs R | 290,964 | 1.16M |
-| 2R vs 2R | 68,973 | 276K |
-| 2B vs R | 33,892 | 136K |
-| 2R vs Q | 27,855 | 111K |
-| 2N vs R | 28,183 | 113K |
-| 2B vs 2B | 5,116 | 20K |
-| N+B vs R / R+N vs Q / R+B vs Q | 0 | 0 (never observed) |
+Qualifying population (upward band crossings; partial data, 22% of pool; winner-side
+decisive games only — both-sides + full archive multiply further):
+
+| expert | total positions | qualifying now | x4 proj (filtered) | x53.6 proj (both sides + full archive) |
+|---|---|---|---|---|
+| balanced (all shards) | 3,505,574 | 552,837 | 2.21M | ~29.6M |
+| gambit | 3,041,084 | 538,777 | 2.16M | ~28.9M |
+| N vs B | 2,876,402 | 360,706 | 1.44M | ~19.3M |
+| piece-trades | 2,679,183 | 129,442 | 518K | ~6.9M |
+| dvoretsky | 495,617 | 34,780 | 139K | ~1.9M |
+| opp-bishops | 459,298 | 52,365 | 209K | ~2.8M |
+| B vs R | 367,499 | 26,654 | 107K | ~1.4M |
+| N vs R | 321,449 | 21,074 | 84K | ~1.1M |
+| 2R vs 2R | 87,947 | 9,011 | 36K | ~483K |
+| 2B vs R | 36,707 | 2,390 | 9.6K | ~128K |
+| 2R vs Q | 31,432 | 3,032 | 12K | ~162K |
+| 2N vs R | 31,429 | 2,740 | 11K | ~147K |
+| 2B vs 2B | 6,453 | 891 | 3.6K | ~48K |
+| N+B vs R / R+N vs Q / R+B vs Q | 0 | 0 | 0 | 0 (never observed) |
 
 External, in hand: tablebase 5.0M syzygy (done) · tactics 6,100,953 puzzles ·
 gambit mined pool. Reference points: 14.6M positions -> ~2000-2200 Elo;

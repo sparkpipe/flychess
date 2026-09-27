@@ -39,6 +39,7 @@ for line in open(sys.argv[1]):
     kres = tuple(sorted(["".join(sorted(res_w)), "".join(sorted(res_b))]))
     symmetric = not res_w and not res_b
     men = r["men"]
+    b0, b1 = r["traj"].split("_to_")
     draw2draw = r["traj"] == "equalize_to_equalize"
 
     e = None
@@ -68,7 +69,11 @@ for line in open(sys.argv[1]):
             balanced_lock[r["lock_c"] if r["lock_c"] < 3 else 3] += 1
 
     experts[e][0] += 1
-    if not draw2draw:
+    # qualifying population: UPWARD band crossing = demonstrated improvement
+    # (40->55 helps; 55->60 same-band does not). Game result irrelevant.
+    order = {"collapse": 0, "defend": 1, "equalize": 2, "press": 3,
+             "convert": 4, "win": 5}
+    if order[b1] > order[b0]:
         experts[e][1] += 1
 
 print("total: %d positions (338K games = ~22%% of pool)" % n)

@@ -87,10 +87,10 @@ count.
 
 TBD knobs: win%-jump size/reference for the trigger.
 
-### 3.3 Material confrontation experts (operator's list, verbatim; 2B vs 2B REMOVED —
-corrected to balanced 2026-09-27: "2B vs 2B is balanced! it is not an imbalance category"
-— both sides holding a bishop pair is symmetric material; its positions shard into
-balanced by locked pawns)
+### 3.3 Material confrontation experts — 11 residue classes
+(2B vs 2B REMOVED 2026-09-27 — "2B vs 2B is balanced! it is not an imbalance category";
+2R vs 2R REMOVED 2026-09-27 — also symmetric, same ruling. Both flow into the balanced
+shards by locked pawns. Symmetric material is never an imbalance category.)
 
 **Matching (RESOLVED ruling):** RESIDUE-BASED — cancel common pieces; the imbalance is the
 difference multiset and **persists in ANY material context** ("in many openings, the
@@ -110,7 +110,6 @@ confrontations).
 | 15 | **2R vs Q** | Q v RR | |
 | 16 | **R+N vs Q** | Q v RN | zero observed in filtered OTB |
 | 17 | **R+B vs Q** | Q v RB | zero observed in filtered OTB |
-| 18 | **2R vs 2R** | symmetric, rooks-only | heavy-piece technique class (exact, not residue) |
 | 19 | **opposite bishops** | symmetric bishops, opposite majority square colors | square-color tag, fires in any material |
 
 Exchange-down is NOT a separate expert — covered by N vs R / B vs R (ruling).
@@ -217,7 +216,6 @@ decisive games only — both-sides + full archive multiply further):
 | B vs R | 367,499 | 26,654 | 107K | ~1.4M |
 | N vs R | 321,449 | 21,074 | 84K | ~1.1M |
 | N+B vs R | 131,366 | 11,692 | 47K | ~627K |
-| 2R vs 2R (symmetric — see §8) | 87,947 | 9,011 | 36K | ~483K |
 | R+B vs Q | 46,327 | 3,607 | 14K | ~193K |
 | 2B vs R | 36,707 | 2,390 | 9.6K | ~128K |
 | R+N vs Q | 36,241 | 2,317 | 9.3K | ~124K |
@@ -262,11 +260,11 @@ dual membership with the stable-category training; (3) 2N vs N+B merged into N v
 (4) balanced shards 0/1/2/3+ confirmed.
 
 Still open:
-1. 2R vs 2R is ALSO symmetric material — same logic as the 2Bv2B correction. Keep as its
-   own heavy-piece technique class, or fold into balanced? (Currently kept per original list.)
-2. Starved-class folding with mass numbers shown first.
-3. Opening-boundary ply value (UCI option, from data).
-4. Tactics-gate win%-jump size/reference.
+1. Starved-class folding with mass numbers shown first.
+2. Opening-boundary ply value (UCI option, from data).
+3. Tactics-gate win%-jump size/reference.
+
+RESOLVED 2026-09-27: 2R vs 2R folded into balanced (symmetric, same as 2B vs 2B).
 
 RESOLVED (record): mid-queenless REMOVED (imbalance + balanced cover it) · tactics = one
 independent puzzle-trained expert, dual-signal protocol · confrontation matching =

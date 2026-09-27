@@ -55,13 +55,19 @@ Standing directives (violations are program-stopping):
 |---|--------|-------------|
 | 7 | **pure tactics** | ONE independent expert trained on the tactics puzzles (Lichess DB, 6.1M theme-tagged) — regardless of material balance, eval trajectory, phase. It only sees pure tactics. It exists OUTSIDE the MoE: see the dual-signal architecture (§2.1). Data: `/home/spec/chess-lab/puzzles/lichess_db_puzzle.csv`. |
 
-**Dual-signal player (operator ruling):** the structured-strategy MoE plays general-concept
-chess — eval slope improvement, slowly squeezing to checkmate — while the tactics player
-cares only about the immediate tactical win. At evaluation time: **first check for an
-immediate tactical win — if present, the tactics expert answers, done. If not, route the MoE.**
-Gate mechanism [READING — ruling pending]: the tactics net evaluates first; a decisive
-tactics-net eval (threshold = UCI option) means the shot is there; otherwise MoE routing.
-Threshold calibrated by ROC on labeled puzzle-vs-quiet positions before any match.
+**Dual-signal player (operator ruling, refined):** the structured-strategy MoE plays
+general-concept chess — eval slope improvement, slowly squeezing to checkmate. The tactics
+player cares only about the immediate tactical win.
+
+**Protocol (verbatim):**
+1. **Trigger:** the positional evaluator says it is a big jump in win percentage — THAT is
+   the trigger. (Jump reference point and size: TBD calibration knobs.)
+2. **On trigger:** the tactical generates its move tree. The positional is ALSO evaluating
+   the ending position of that tree (depth TBD).
+3. **No trigger:** normal positional MoE evaluation.
+
+The tactical expert is puzzle-trained (pure tactics, blind to material balance/eval
+trajectory/phase) and engages ONLY on trigger — there is no always-on tactics scan.
 
 ### 3.3 Material confrontation experts (operator's list, verbatim)
 

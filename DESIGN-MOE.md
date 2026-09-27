@@ -253,6 +253,18 @@ from seeds ONLY on explicit ruling (self-play ban applies to real training).
 | Training | nnue-pytorch, CUDA-optimized, 20GB VRAM approved |
 | Match | SPRT: expert-MoE vs monolithic, SAME TOTAL budget + 2x/4x/8x curves |
 
+### 6.2 Audit (2026-09-27, operator-ordered) — ACCEPTED NOISE
+
+Random credited pieces verified with fresh depth-12 evals at every ply, independent
+expert recomputation, bit-level round-trip:
+- Round-trip 80/80 PASS; expert membership PASS (zero mismatches).
+- Stored-vs-fresh evals: median |d| 8cp, p90 62cp, max 161cp; same-binary hash-size-only
+  test flips 6.4% of positions across the walls — depth-12 search non-convergence
+  ("chess is confusing" — operator). **RULING: acceptable noise.** Depth-12 continues;
+  cp targets dominate training; category labels carry ~6% wall fuzz by design.
+- Engine bug found+fixed during audit: fork segfaulted clearing accumulator caches of
+  unloaded slots — only loaded slots are touched now.
+
 ## 8. Open questions for ruling
 
 RESOLVED 2026-09-27: (1) puzzle packing = entire combination, all correct, secondary

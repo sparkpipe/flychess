@@ -104,12 +104,8 @@ confrontations).
 | 8 | **2N vs N+B** | MERGED into N vs B (ruling 2026-09-27) | |
 | 10 | **N vs R** | R v N | INCLUDES exchange-down play, both sides ("saving the draw being an exchange down is a super important skill" — the DOWN side's data comes from the both-sides dump) |
 | 11 | **B vs R** | R v B | same, includes exchange-down |
-| 12 | **2N vs R** | R v NN | |
-| 13 | **N+B vs R** | R v NB | zero observed in filtered OTB (§6.1) |
-| 14 | **2B vs R** | R v BB | |
-| 15 | **2R vs Q** | Q v RR | |
-| 16 | **R+N vs Q** | Q v RN | zero observed in filtered OTB |
-| 17 | **R+B vs Q** | Q v RB | zero observed in filtered OTB |
+| 12 | **R vs 2 minors** | R v {NN, NB, BB} — MERGED (ruling: "combine 2N vs R, 2B vs R with N+B vs R") | |
+| 13 | **Q vs material** | Q v {RR, RN, RB} — MERGED (ruling: "combine R+B vs Q and R+N vs Q and 2R vs Q") | |
 | 19 | **opposite bishops** | symmetric bishops, opposite majority square colors | square-color tag, fires in any material |
 
 Exchange-down is NOT a separate expert — covered by N vs R / B vs R (ruling).
@@ -219,12 +215,12 @@ Packer: tools/pack_expert_bins.py, validated — all class counts match census e
 | opp-bishops | 459,298 | 52,365 | 209K | ~2.8M |
 | B vs R | 367,499 | 26,654 | 107K | ~1.4M |
 | N vs R | 321,449 | 21,074 | 84K | ~1.1M |
-| N+B vs R | 131,366 | 11,692 | 47K | ~627K |
-| R+B vs Q | 46,327 | 3,607 | 14K | ~193K |
-| 2B vs R | 36,707 | 2,390 | 9.6K | ~128K |
-| R+N vs Q | 36,241 | 2,317 | 9.3K | ~124K |
-| 2R vs Q | 31,432 | 3,032 | 12K | ~162K |
-| 2N vs R | 31,429 | 2,740 | 11K | ~147K |
+
+
+
+
+| R vs 2 minors (merged) | 199,502 | 32,761 | 131K | ~1.76M |
+| Q vs material (merged) | 114,000 | 16,735 | 67K | ~897K |
 | 2B vs 2B | 6,453 | 891 | 3.6K | ~48K |
 
 (2026-09-27 census-bug fix: N+B vs R / R+N vs Q / R+B vs Q previously read as zero —

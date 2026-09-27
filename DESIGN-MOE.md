@@ -177,7 +177,9 @@ v1: one balanced net; C is reported in the matrix and available as a routing axi
 ## 6. Training data selection
 
 - **Source**: `gambit/filtered.pgn` — decisive OTB games, winner >=2400, loser >=2000
-  (~1.53M games, full dump in progress). Winner positions only, full sweep of winning moves.
+  (~1.53M games). **BOTH SIDES' positions (ruling 2026-09-27: "the losing side can also
+  create training worthy data" — defensive play, exchange-down saving, is the DOWN side's
+  data).** Full archive (10.3M games) is the expansion source for starved classes.
 - **Evaluations**: depth 12 minimum (fleet, all 14 sparks). Depth-1 gambit evals are OBSOLETE, never used.
 - **Moves included**: castling, en passant, threefold repetition, underpromotions — all must appear.
 - **Elo floor**: stay with 2400+ for our moves.
@@ -216,8 +218,15 @@ v1: one balanced net; C is reported in the matrix and available as a routing axi
 ## 8. Open questions for ruling (nothing proceeds on these without the operator)
 
 1. Tactics gate: threshold calibration method (ROC on puzzle-vs-quiet labeled sets) and the training-target design for puzzle positions (decisive-win labeling) — proposal before packing.
-2. Confrontation matching: cancel-common + reduced-material-only reading (§3.3) — confirm or override.
-3. Balanced spectrum: one net (v1 recommendation, §5) vs split at calibrated quantiles.
+2. RESOLVED 2026-09-27: confrontation matching is RESIDUE-BASED (cancel common pieces,
+   imbalance persists in ANY material context — "in many openings the mainline is BxN,
+   which creates the N vs B imbalance"). Caveat recorded: residue conflates 2N vs N+B into
+   N vs B (same difference multiset); if 2N vs N+B must stay distinct the predicate needs
+   residue + on-board minors count.
+3. RESOLVED 2026-09-27: balanced positions are SHARDED by the amount of locked pawns
+   (operator ruling, repeated). Census distribution of center-locked files within balanced
+   (partial data): lock_c=0: 53.4%, lock_c=1: 34.0%, lock_c=2: 9.8%, lock_c=3+: 2.7%.
+   Shard cuts and count final at full-data census.
 4. Starved-class folding (with mass numbers shown first).
 5. Opening-boundary ply value (from data; UCI option).
 

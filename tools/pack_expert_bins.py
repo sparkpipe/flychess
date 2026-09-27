@@ -117,9 +117,8 @@ def assign(r):
         return "oppb", r["exch"]
     if men <= 10:
         return "dvoretsky", r["exch"]
-    if r["ply"] < 24 and (not symmetric
-                           or w.count("P") != b.count("P")):
-        return "gambit", r["exch"]   # pawn sac/grab early = gambit too
+    # gambit: NO cascade branch — that expert trains exclusively on the
+    # already-curated pool (tbpools/GAMBIT.jsonl); re-derivation deprecated
     lk = r["lock_c"] if r["lock_c"] < 3 else 3
     return "balanced_l%d" % lk, r["exch"]
 

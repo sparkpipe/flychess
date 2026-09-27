@@ -273,9 +273,12 @@ dual membership with the stable-category training; (3) 2N vs N+B merged into N v
 (4) balanced shards 0/1/2/3+ confirmed.
 
 Still open:
-1. Starved-class folding with mass numbers shown first.
-2. Opening-boundary ply value (UCI option, from data).
-3. Tactics-gate win%-jump size/reference.
+1. Starved-class folding with mass numbers shown first (thinnest on full pool: qvmat 175K).
+
+RESOLVED 2026-09-27:
+- Opening boundary = **move 15 = 30 plies** (ruling); UCI default 30.
+- Tactics-gate "big jump": NO separate knob — a jump is "big" iff it crosses at
+  least one band wall (30/45/55/70). Same trajectory system, no new constant.
 
 RESOLVED 2026-09-27: 2R vs 2R folded into balanced (symmetric, same as 2B vs 2B).
 

@@ -59,15 +59,20 @@ Standing directives (violations are program-stopping):
 general-concept chess — eval slope improvement, slowly squeezing to checkmate. The tactics
 player cares only about the immediate tactical win.
 
-**Protocol (verbatim):**
-1. **Trigger:** the positional evaluator says it is a big jump in win percentage — THAT is
-   the trigger. (Jump reference point and size: TBD calibration knobs.)
-2. **On trigger:** the tactical generates its move tree. The positional is ALSO evaluating
-   the ending position of that tree (depth TBD).
-3. **No trigger:** normal positional MoE evaluation.
+**Protocol (verbatim, assembled):**
+1. **The tactics evaluator runs FIRST** — on every position, at evaluation time.
+2. It **finds its best move** (the tactical candidate — the puzzle-trained net is
+   move-producing, not just an eval).
+3. Behind that move **there is a move tree at depth** — the tactical line. **The leaf
+   node** is the ending position.
+4. The **positional evaluator evaluates the leaf node** (depth TBD).
+5. **If the positional evaluator says it is a big jump in win percentage — THAT is the
+   trigger:** immediate tactical win confirmed, the tactics move is the answer. Done.
+6. **No jump: no tactic** — normal positional MoE evaluation/routing.
 
-The tactical expert is puzzle-trained (pure tactics, blind to material balance/eval
-trajectory/phase) and engages ONLY on trigger — there is no always-on tactics scan.
+TBD calibration knobs: tactical tree depth, leaf-evaluation depth, jump size/reference.
+The tactics expert is puzzle-trained (pure tactics, blind to material balance/eval
+trajectory/phase) and runs first at every evaluation.
 
 ### 3.3 Material confrontation experts (operator's list, verbatim)
 

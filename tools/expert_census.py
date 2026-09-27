@@ -26,6 +26,8 @@ RESIDUE = {
 
 experts = defaultdict(lambda: [0, 0])
 balanced_lock = defaultdict(int)
+balanced_lock_qual = defaultdict(int)
+lk = 0
 n = 0
 for line in open(sys.argv[1]):
     r = json.loads(line)
@@ -56,8 +58,6 @@ for line in open(sys.argv[1]):
             np_b = "".join(sorted(x for x in b if x != "P"))
             if np_w == "RR" and np_b == "RR":
                 e = "2Rv2R"
-            elif np_w == "BB" and np_b == "BB" and "N" not in w + b:
-                e = "2Bv2B"
             elif r.get("bishops_i") == "opp_bishops":
                 e = "oppBishops"
         else:
@@ -71,7 +71,8 @@ for line in open(sys.argv[1]):
             e = "gambit-earlyasym"
         else:
             e = "balanced"
-            balanced_lock[r["lock_c"] if r["lock_c"] < 3 else 3] += 1
+            lk = r["lock_c"] if r["lock_c"] < 3 else 3
+            balanced_lock[lk] += 1
 
     experts[e][0] += 1
     # qualifying population: UPWARD band crossing = demonstrated improvement
@@ -80,13 +81,17 @@ for line in open(sys.argv[1]):
              "convert": 4, "win": 5}
     if order[b1] > order[b0]:
         experts[e][1] += 1
+        if e == "balanced":
+            balanced_lock_qual[lk if lk < 3 else 3] += 1
 
 print("total: %d positions (338K games = ~22%% of pool)" % n)
 print("%-22s%12s%11s%12s" % ("expert", "positions", "trainable", "x4-proj"))
 for e, (p, t) in sorted(experts.items(), key=lambda kv: -kv[1][0]):
     if e:
         print("%-22s%12s%11s%12s" % (e, format(p, ","), format(t, ","), format(4 * p, ",")))
-print("\nbalanced by center-locked files (0,1,2,3+):")
+print("\nbalanced by center-locked files (0,1,2,3+): total / qualifying / x4-qual-proj")
 tot = sum(balanced_lock.values())
-for lk in sorted(balanced_lock):
-    print("  lock_c=%d: %11s (%5.1f%%)" % (lk, format(balanced_lock[lk], ","), 100.0 * balanced_lock[lk] / tot))
+for k in sorted(balanced_lock):
+    print("  lock_c=%d: %11s (%5.1f%%)  qual %9s  x4-qual %10s" % (
+        k, format(balanced_lock[k], ","), 100.0 * balanced_lock[k] / tot,
+        format(balanced_lock_qual[k], ","), format(4 * balanced_lock_qual[k], ",")))

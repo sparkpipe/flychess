@@ -87,7 +87,10 @@ count.
 
 TBD knobs: win%-jump size/reference for the trigger.
 
-### 3.3 Material confrontation experts (operator's list, verbatim)
+### 3.3 Material confrontation experts (operator's list, verbatim; 2B vs 2B REMOVED —
+corrected to balanced 2026-09-27: "2B vs 2B is balanced! it is not an imbalance category"
+— both sides holding a bishop pair is symmetric material; its positions shard into
+balanced by locked pawns)
 
 **Matching (RESOLVED ruling):** RESIDUE-BASED — cancel common pieces; the imbalance is the
 difference multiset and **persists in ANY material context** ("in many openings, the
@@ -99,7 +102,6 @@ confrontations).
 |---|--------|------------------------------|-------|
 | 7 | **N vs B** | N v B | the BxN-mainline mass; also absorbs 2N vs N+B by residue (caveat below) |
 | 8 | **2N vs N+B** | MERGED into N vs B (ruling 2026-09-27) | |
-| 9 | **2B vs 2B** | symmetric, bishops-only minors both pairs | symmetric class (fires on exact structure, not residue) |
 | 10 | **N vs R** | R v N | INCLUDES exchange-down play, both sides ("saving the draw being an exchange down is a super important skill" — the DOWN side's data comes from the both-sides dump) |
 | 11 | **B vs R** | R v B | same, includes exchange-down |
 | 12 | **2N vs R** | R v NN | |
@@ -189,6 +191,18 @@ sharding proceeds per ruling; C remains available as a smoothing/reporting axis.
 
 ### 6.1 Expert data census (partial data: 13,990,350 positions = 338K games = 22% of pool)
 
+Balanced shard breakdown (total / qualifying / x4-qualifying projection):
+
+| shard | total | share | qualifying | x4-qual proj |
+|---|---|---|---|---|
+| lock_c=0 | 1,789,470 | 52.8% | 257,387 | 1.03M |
+| lock_c=1 | 1,163,281 | 34.4% | 195,361 | 781K |
+| lock_c=2 | 338,001 | 10.0% | 63,833 | 255K |
+| lock_c=3+ | 95,261 | 2.8% | 24,459 | 98K |
+
+(The 3+ shard at ~98K filtered projection folds into 2+ unless the full-archive expansion
+sustains it — per shard ruling, cuts confirmed 0/1/2/3+ and revisited at full census.)
+
 Qualifying population (upward band crossings; partial data, 22% of pool; winner-side
 decisive games only — both-sides + full archive multiply further):
 
@@ -203,7 +217,7 @@ decisive games only — both-sides + full archive multiply further):
 | B vs R | 367,499 | 26,654 | 107K | ~1.4M |
 | N vs R | 321,449 | 21,074 | 84K | ~1.1M |
 | N+B vs R | 131,366 | 11,692 | 47K | ~627K |
-| 2R vs 2R | 87,947 | 9,011 | 36K | ~483K |
+| 2R vs 2R (symmetric — see §8) | 87,947 | 9,011 | 36K | ~483K |
 | R+B vs Q | 46,327 | 3,607 | 14K | ~193K |
 | 2B vs R | 36,707 | 2,390 | 9.6K | ~128K |
 | R+N vs Q | 36,241 | 2,317 | 9.3K | ~124K |
@@ -248,10 +262,11 @@ dual membership with the stable-category training; (3) 2N vs N+B merged into N v
 (4) balanced shards 0/1/2/3+ confirmed.
 
 Still open:
-1. Starved-class folding with mass numbers shown first (2Bv2B ~48K full-expansion proj is
-   the thinnest).
-2. Opening-boundary ply value (UCI option, from data).
-3. Tactics-gate win%-jump size/reference.
+1. 2R vs 2R is ALSO symmetric material — same logic as the 2Bv2B correction. Keep as its
+   own heavy-piece technique class, or fold into balanced? (Currently kept per original list.)
+2. Starved-class folding with mass numbers shown first.
+3. Opening-boundary ply value (UCI option, from data).
+4. Tactics-gate win%-jump size/reference.
 
 RESOLVED (record): mid-queenless REMOVED (imbalance + balanced cover it) · tactics = one
 independent puzzle-trained expert, dual-signal protocol · confrontation matching =

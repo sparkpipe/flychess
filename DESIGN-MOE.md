@@ -174,12 +174,13 @@ sharding proceeds per ruling; C remains available as a smoothing/reporting axis.
   - Per-position: config, opp/same bishops, lock_c/lock_e/tension/open, men, phase.
 - **Trajectory classes** (W = 1/(1+exp(-cp/361))): press 55-70, convert 70-win, equalize
   45-55, defend 30-45, win 95+, collapse <30; segments classified start-band -> end-band.
-  - **SELECTION RULE (verbatim ruling):** the result of the game does not matter — we look
-    for **steady improvement of position**, regardless of where it started or what happened
-    in the game. "A 55% to 60% does not help us; a 40% to 55% does."
-    Qualifying segment = **upward band crossing** (end band higher than start band).
-    Same-band segments are ALL excluded (any band, either direction). Result-agnostic —
-    improving segments from losing sides and drawn games all qualify.
+  - **SELECTION RULE (verbatim rulings):** the result of the game does not matter — we look
+    for **steady improvement of position**. "A 55% to 60% does not help us; a 40% to 55%
+    does." THE FOUR CATEGORIES (ruling 2026-09-27): **30->45, 45->60, 55->70, 70->win**.
+    "What is this 95%??? From 70% to win" — there is NO 95 wall; win begins at 70.
+    Machine: pieces cut at band walls 30/45/55/70; credited when closing on a qualifying
+    climb of EITHER side (white rising, or white falling = black rising); convert pieces
+    (>=70) close at segment end while still climbing. Same-band positions are excluded.
   - Eval slope EMA'd (ruling).
 - **The matrix**: (config x trajectory) with segments/ply counts — per-expert mass,
   cut-point calibration, starved-class detection.

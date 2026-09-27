@@ -26,10 +26,41 @@ RESIDUE = {
     for (a, b), v in RESIDUE_RAW.items()
 }
 
+
+# operator bands: defend 30-45, equalize 45-55, press 55-70, convert 70-win
+GROUPS = [(0.0, "deep"), (0.30, "defend"), (0.45, "equalize"),
+          (0.55, "press"), (0.70, "convert")]
+
+
+def wp_group(wp):
+    g = "loss"
+    for lo, name in GROUPS:
+        if wp >= lo:
+            g = name
+    return g
+
+
+# the three categories (operator ruling): loss->equal, equal->strong, strong->win
+# side-agnostic: white RISING pieces climb directly; white FALLING pieces are
+# BLACK climbing (strong->equal fall = black loss->equal, etc.; win->strong
+# fall = black loss->loss, which is not one of the three)
+# the FOUR categories (operator ruling): 30->45, 45->60, 55->70, 70->win
+# machine: pieces cut at band walls; closure on a qualifying climb of either
+# side; convert pieces (>=70, no wall above) close at segment end while rising
+CLIMB = {("defend", "equalize"): "30to45",
+         ("equalize", "press"): "45to60",
+         ("press", "convert"): "55to70",
+         ("equalize", "defend"): "30to45",   # black climbing
+         ("press", "equalize"): "45to60"}    # black climbing
+
 experts = defaultdict(lambda: [0, 0])
+cats = defaultdict(int)
+cur_seg = None
+piece_group = piece_expert = piece_lock = None
+piece_len = piece_first_wp = None
 balanced_lock = defaultdict(int)
 balanced_lock_qual = defaultdict(int)
-lk = 0
+prev_group = None
 n = 0
 for line in open(sys.argv[1]):
     r = json.loads(line)
@@ -52,6 +83,7 @@ for line in open(sys.argv[1]):
     draw2draw = r["traj"] == "equalize_to_equalize"
 
     e = None
+    exch_first = r["exch"]
     if men <= 5:
         e = "TB-region-OTB"
     else:
@@ -66,7 +98,7 @@ for line in open(sys.argv[1]):
         if men <= 10:
             e = "dvoretsky"
         elif r["exch"]:
-            e = "pieceTrades-approx"
+            e = "exchtrans"   # transient: not a piece-attribution class
         # NOTE: no cascade-gambit branch. The gambit expert trains EXCLUSIVELY on
         # the already-curated gambit pool (tbpools/GAMBIT.jsonl, operator-mined).
         # Cascade re-derivation of gambit data is DEPRECATED (operator correction).
@@ -76,19 +108,56 @@ for line in open(sys.argv[1]):
             balanced_lock[lk] += 1
 
     experts[e][0] += 1
-    # qualifying population: ANY band crossing = demonstrated improvement by
-    # SOMEONE (40->55 helps; 55->60 same-band does not). With wp in white
-    # perspective, a crossing down = the black side improving. Result-agnostic.
-    if b0 != b1:
-        experts[e][1] += 1
-        if e == "balanced":
-            balanced_lock_qual[lk if lk < 3 else 3] += 1
+
+    # THREE-CATEGORY selection (operator ruling): loss->equal, equal->strong,
+    # strong->win. A piece = run of positions inside one segment with constant
+    # group; it is credited when it CLOSES on a qualifying rise (the climbing
+    # side's step). Pieces interrupted by segment boundaries discard.
+    seg_id = (r["gid"], r["traj"], r["seg_start_wp"], r["seg_end_wp"])
+    g = wp_group(r["wp"])
+    if seg_id != cur_seg or g != piece_group:
+        if seg_id == cur_seg and CLIMB.get((piece_group, g)):
+            rise = CLIMB[(piece_group, g)]
+            experts[piece_expert][1] += piece_len
+            cats[rise] += piece_len
+            if piece_expert == "balanced":
+                balanced_lock_qual[piece_lock] += piece_len
+            if piece_exch:
+                experts["exchanges"] = [experts["exchanges"][0],
+                                        experts["exchanges"][1] + 1]
+        elif seg_id != cur_seg and piece_group == "convert" \
+                and piece_last_wp > piece_first_wp:
+            experts[piece_expert][1] += piece_len   # 70->win (white converting)
+            cats["70towin"] += piece_len
+            if piece_exch:
+                experts["exchanges"] = [experts["exchanges"][0],
+                                        experts["exchanges"][1] + 1]
+        elif seg_id != cur_seg and piece_group == "deep" \
+                and piece_last_wp < piece_first_wp:
+            experts[piece_expert][1] += piece_len   # 70->win (black converting)
+            cats["70towin"] += piece_len
+            if piece_exch:
+                experts["exchanges"] = [experts["exchanges"][0],
+                                        experts["exchanges"][1] + 1]
+        cur_seg = seg_id
+        piece_group = g
+        piece_expert = "balanced" if e == "exchtrans" else e
+        piece_lock = lk if lk < 3 else 3
+        piece_exch = exch_first
+        piece_len = 1
+        piece_first_wp = piece_last_wp = r["wp"]
+    else:
+        piece_len += 1
+    piece_last_wp = r["wp"]
 
 print("total: %d positions (338K games = ~22%% of pool)" % n)
 print("%-22s%12s%11s%12s" % ("expert", "positions", "trainable", "x4-proj"))
 for e, (p, t) in sorted(experts.items(), key=lambda kv: -kv[1][0]):
     if e:
         print("%-22s%12s%11s%12s" % (e, format(p, ","), format(t, ","), format(4 * p, ",")))
+print("\nby category (positions in qualifying pieces):")
+for c, n in sorted(cats.items(), key=lambda kv: -kv[1]):
+    print("  %-16s %11s" % (c, format(n, ",")))
 print("\nbalanced by center-locked files (0,1,2,3+): total / qualifying / x4-qual-proj")
 tot = sum(balanced_lock.values())
 for k in sorted(balanced_lock):

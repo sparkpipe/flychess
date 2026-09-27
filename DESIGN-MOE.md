@@ -1,5 +1,7 @@
 # PHASE-MoE DESIGN DOCUMENT — consolidated from the full operator record
-**Version 1.0 — 2026-09-27. This document is the single source of truth for the expert taxonomy, routing, data selection, and experiment protocol. Every line traces to an operator ruling. Where a reading was chosen, it is marked [READING — ruling pending].**
+**Version 1.6 — 2026-09-27. Single source of truth for expert taxonomy, routing, data
+selection, and experiment protocol. Every line traces to an operator ruling; where a
+reading was chosen it is marked [READING — ruling pending].**
 
 ---
 
@@ -26,10 +28,10 @@ Standing directives (violations are program-stopping):
   N-slot engine: per-slot `EvalFile`, per-slot replicated `Network`, per-slot
   `AccumulatorStack` + `AccumulatorCaches` (one dirty-set mirror per move; only the routed
   net evaluates — zero routing overhead measured in v0).
-- UCI: `EvalFile` (slot 1) + `EvalFile2..EvalFileN` for the rest; unfilled slots fall back
-  to the first loaded net (never a zero-weights eval).
-- Router = pure function of the position (material counts, pawn contact, total men, game ply).
-  Cut points are UCI options calibrated from data, never frozen in code.
+- UCI: `EvalFile` (slot 1) + `EvalFile2..EvalFileN`; unfilled slots fall back to the first
+  loaded net (never a zero-weights eval).
+- Router = pure function of the position (material residue, pawn contact, total men, game
+  ply). Cut points are UCI options calibrated from data, never frozen in code.
 - Debug modes (`PHASE_MOE` env): 0=off, 1=route, 2=always-endgame, 3=dual-evaluate, 4=route trace.
 - Trainer: official nnue-pytorch, features `HalfKAv2_hm^` (with caret), 40-byte nodchip
   bins (`<32shHHbB`, unsigned move field).
@@ -39,25 +41,25 @@ Standing directives (violations are program-stopping):
 
 ## 3. THE EXPERT LIST
 
-### 3.1 Phase / structural experts
+### 3.1 Structural experts
 
 | # | Expert | Description | Routing predicate | Training data |
 |---|--------|-------------|-------------------|---------------|
-| 1 | **opening-gambit** | Early sacrificed or grabbed material; initiative-first play. Dataset ALREADY EXISTS (gambit pool mined from 94K matched games; initial-drop-of-a-pawn pattern). | game_ply < opening bound AND asymmetric material | existing gambit dataset + early-asymmetric segments |
-| 2 | **balanced** | Symmetric material, any pawn count, queens on or off, no listed confrontation. The locked-pawn closedness spectrum lives INSIDE this domain (see §5). | symmetric counts, no confrontation fired | balanced-config segments, all trajectories |
-| 3 | **piece-trades** | The trade decisions: positions with an equal-value capture available, and the exchange moves themselves (material-change boundaries). The expert in WHEN to trade. | equal-type or cross-minor capture available in non-endgame material [READING — ruling pending] | `exch`-tagged positions + pre-trade tension positions |
-| 5 | **endgame-dvoretsky** | Practical endgames, 6-10 men, not a listed confrontation. CONFIRMED by operator. | 6 <= men <= 10 (after confrontation table) | dvoretsky-region segments |
-| 6 | **endgame-tablebase** | Exact endgames, <=5 men. CONFIRMED. Syzygy-generated training data COMPLETE (exactly 5,000,000 positions in `tb_training.bin`). | men <= 5 — absolute, first check | syzygy data (done) |
+| 1 | **opening-gambit** | Early sacrificed or grabbed material; initiative-first play. | game_ply < opening bound AND asymmetric residue | existing gambit dataset (mined pool) + early-asymmetric segments |
+| 2 | **balanced** (sharded) | Symmetric material residue, no listed confrontation. **Sharded by the amount of locked pawns** (ruling, §5): lock_c = 0 / 1 / 2 / 3+ | symmetric residue, no confrontation, past opening | balanced segments, sharded by lock_c at packing |
+| 3 | **piece-trades** | The trade decisions: positions with an equal-value capture available, and the exchange moves themselves (material-change boundaries). The expert in WHEN to trade. | equal-type or cross-minor capture available [READING — ruling pending] | `exch`-tagged positions + pre-trade tension positions |
+| 4 | **endgame-dvoretsky** | Practical endgames, 6-10 men, no listed confrontation. CONFIRMED. | 6 <= men <= 10 (after confrontation table) | dvoretsky-region segments |
+| 5 | **endgame-tablebase** | Exact endgames, <=5 men. CONFIRMED. Syzygy training data COMPLETE (exactly 5,000,000 positions). | men <= 5 — absolute, first check | syzygy (done) |
 
 ### 3.2 Tactics expert (independent, puzzle-trained)
 
 | # | Expert | Description |
 |---|--------|-------------|
-| 7 | **pure tactics** | ONE independent expert trained on the tactics puzzles (Lichess DB, 6.1M theme-tagged) — regardless of material balance, eval trajectory, phase. It only sees pure tactics. It exists OUTSIDE the MoE: see the dual-signal architecture (§2.1). Data: `/home/spec/chess-lab/puzzles/lichess_db_puzzle.csv`. |
+| 6 | **pure tactics** | ONE independent expert trained on the tactics puzzles (Lichess DB, 6,100,953 theme-tagged) — regardless of material balance, eval trajectory, phase. It only sees pure tactics. It exists OUTSIDE the MoE (dual-signal protocol below). |
 
-**Dual-signal player (operator ruling, refined):** the structured-strategy MoE plays
-general-concept chess — eval slope improvement, slowly squeezing to checkmate. The tactics
-player cares only about the immediate tactical win.
+**Dual-signal player (ruling):** the structured-strategy MoE plays general-concept chess —
+eval slope improvement, slowly squeezing to checkmate — while the tactics player cares only
+about the immediate tactical win.
 
 **Protocol (verbatim, assembled):**
 1. **The tactics evaluator runs FIRST** — on every position, at evaluation time.
@@ -65,18 +67,14 @@ player cares only about the immediate tactical win.
    move-producing, not just an eval).
 3. Behind that move **there is a move tree at depth** — the tactical line. **The leaf
    node** is the ending position.
-4. The **positional evaluator evaluates the leaf node** (depth TBD).
+4. The **positional evaluator evaluates the leaf node** (depth = runtime parameter, UCI).
 5. **If the positional evaluator says it is a big jump in win percentage — THAT is the
    trigger:** immediate tactical win confirmed, the tactics move is the answer. Done.
 6. **No jump: no tactic** — normal positional MoE evaluation/routing.
 
 **Tactical tree termination (ruling):** the tree expands **until the position is QUIET** —
 no imminent trades, no other short-term tactics. Quiescence termination, not a fixed ply
-count. (Same notion as the trade/tension data tags: the tree runs through the forcing
-material and stops when the dust settles.)
-
-**Leaf positional depth (ruling):** the depth of the positional search at the end of the
-tactical leaf is a **RUNTIME PARAMETER** (UCI option).
+count.
 
 **Time management (ruling) — trajectory-driven:**
 - **Investment phase:** early, we invest our time to get as good of a position as possible.
@@ -84,155 +82,165 @@ tactical leaf is a **RUNTIME PARAMETER** (UCI option).
   is the time investment that got us into time trouble created a good position.
 - **Critical-area rule:** if the position is LOSING win percentage and getting close to the
   critical area **40%**, we spend MORE time to try to get back to **45%+**.
-- Constants given: 40% critical, 45% recovery. Investment→harvest switch point: runtime
-  parameter. The win% trajectory over the game (EMA'd) drives the policy — same trajectory
-  signal as the training-data bands (45-55 equalize, 30-45 defend).
+- Constants given: 40% critical, 45% recovery. Investment→harvest switch: runtime parameter.
+  Driver: the EMA'd win% trajectory over the game — same signal as the training bands.
 
-TBD calibration knobs: jump size/reference for the trigger.
-The tactics expert is puzzle-trained (pure tactics, blind to material balance/eval
-trajectory/phase) and runs first at every evaluation.
+TBD knobs: win%-jump size/reference for the trigger.
 
 ### 3.3 Material confrontation experts (operator's list, verbatim)
 
-Traded-down technique confrontations. Matching reading [READING — ruling pending]: a class
-fires when the board's non-pawn material, after canceling common pieces, IS the confrontation
-(pawns free) — so confrontations inside big material belong to the tactics family, and the
-confrontation experts own the reduced/technique positions.
+**Matching (RESOLVED ruling):** RESIDUE-BASED — cancel common pieces; the imbalance is the
+difference multiset and **persists in ANY material context** ("in many openings, the
+mainline is BxN, which creates the N vs B imbalance" — an N-vs-B middlegame with queens and
+rooks on is an N-vs-B position). Pawns are free (pawn-count differences are not
+confrontations).
 
-| # | Expert | Confrontation |
-|---|--------|---------------|
-| 8 | **N vs B** | knight vs bishop minor ending (2 minors on board) |
-| 9 | **2N vs N+B** | two knights vs mixed minors (3 minors on board) |
-| 10 | **2B vs 2B** | bishop pair vs bishop pair |
-| 11 | **N vs R** | knight vs rook — INCLUDES exchange-down play (both sides: the rook converting, the minor side saving the draw — "saving the draw being an exchange down is a super important skill") |
-| 12 | **B vs R** | bishop vs rook — same, includes exchange-down |
-| 13 | **2N vs R** | rook vs two knights |
-| 14 | **N+B vs R** | rook vs knight+bishop |
-| 15 | **2B vs R** | rook vs bishop pair |
-| 16 | **2R vs Q** | two rooks vs queen |
-| 17 | **R+N vs Q** | queen vs rook+knight |
-| 18 | **R+B vs Q** | queen vs rook+bishop |
-| 19 | **2R vs 2R** | heavy-piece symmetric — own technique class |
-| 20 | **opposite bishops** | equal bishops, opposite square colors — drawing/technique patterns |
+| # | Expert | Residue (either orientation) | Notes |
+|---|--------|------------------------------|-------|
+| 7 | **N vs B** | N v B | the BxN-mainline mass; also absorbs 2N vs N+B by residue (caveat below) |
+| 8 | **2N vs N+B** | (see caveat) | same residue multiset as N vs B — keeping it distinct needs residue + on-board minors count (open question 3) |
+| 9 | **2B vs 2B** | symmetric, bishops-only minors both pairs | symmetric class (fires on exact structure, not residue) |
+| 10 | **N vs R** | R v N | INCLUDES exchange-down play, both sides ("saving the draw being an exchange down is a super important skill" — the DOWN side's data comes from the both-sides dump) |
+| 11 | **B vs R** | R v B | same, includes exchange-down |
+| 12 | **2N vs R** | R v NN | |
+| 13 | **N+B vs R** | R v NB | zero observed in filtered OTB (§6.1) |
+| 14 | **2B vs R** | R v BB | |
+| 15 | **2R vs Q** | Q v RR | |
+| 16 | **R+N vs Q** | Q v RN | zero observed in filtered OTB |
+| 17 | **R+B vs Q** | Q v RB | zero observed in filtered OTB |
+| 18 | **2R vs 2R** | symmetric, rooks-only | heavy-piece technique class (exact, not residue) |
+| 19 | **opposite bishops** | symmetric bishops, opposite majority square colors | square-color tag, fires in any material |
 
-Exchange-down is NOT a separate expert — covered by N vs R / B vs R (operator ruling).
-
-Starved classes (rare confrontations with too little OTB mass) fold into a neighboring class
-ONLY on explicit operator ruling, with the mass numbers shown first (e.g. the three
-rook-vs-two-minors forms). Never silently.
+Exchange-down is NOT a separate expert — covered by N vs R / B vs R (ruling).
+Starved classes fold into a neighbor ONLY on explicit ruling with mass numbers shown first.
 
 ---
 
-## 4. Routing cascade (first match wins)
+## 4. Evaluation order and routing cascade
 
+**Stage 0 — dual-signal tactics protocol** (§3.2): tactics evaluator first → best move →
+tree until quiet → positional evaluates the leaf → win%-jump = tactic confirmed (done);
+no jump → continue.
+
+**MoE cascade (first match wins):**
 1. men <= 5 → **tablebase** (exact knowledge is absolute)
-2. confrontation table (§3.3) → its expert
-3. men <= 10 → **dvoretsky** (general practical endgame not in the table)
-4. tactics family: unbalanced material inside big material → matrix-derived bucket
-5. queens == 0, symmetric → **mid-queenless**
-6. equal-value capture available → **piece-trades**
-7. game_ply < opening bound AND asymmetric → **opening-gambit**
-8. symmetric → **balanced** (spectrum inside, §5)
+2. confrontation residue table (§3.3) → its expert
+3. men <= 10 → **dvoretsky** (general practical endgame, no confrontation)
+4. equal-value capture available → **piece-trades**
+5. game_ply < opening bound AND asymmetric residue → **opening-gambit**
+6. symmetric residue → **balanced**, sharded by lock_c (§5)
 
-The opening boundary ply is a UCI option, calibrated from data. No other free constants.
+Opening boundary ply: UCI option, calibrated from data. No other free constants.
 
 ---
 
-## 5. The locked-pawn closedness spectrum (balanced positions only)
+## 5. Locked-pawn closedness — balanced positions only
 
-Applies ONLY to balanced (symmetric-material) positions. Components, per the operator's
-definition:
+Applies ONLY to balanced (symmetric-residue) positions. **Balanced is SHARDED by the
+amount of locked pawns (ruling).** Census distribution of center-locked files within
+balanced (partial data, 22% of pool): **lock_c=0: 53.4% · 1: 34.0% · 2: 9.8% · 3+: 2.7%**
+→ shard cuts 0/1/2/3+, final at full-data census (3+ may fold into 2+ if starved).
 
+Definitions (operator's, verbatim):
 - **Locked**: facing pawns on the same file (white pawn directly below a black pawn).
-- **Tension**: capturable pawns (a pawn of one side attacks a pawn of the other).
+- **Tension**: capturable pawns.
 - **Open file**: no pawns at all on the file.
-- **Edge files locked != closed**: center remains playable — edge locks carry half weight.
-- **Before any contact**: neutral/undetermined (e.g., the start position).
+- **Edge files locked != closed** — center remains playable.
+- **Before any contact**: neutral/undetermined.
 
-Calculation (per position, fully position-derivable):
+Continuous metric (recorded on every position by extractor v2, available engine-side):
 ```
 per file f in a..h:  weight w(f) = 2 for c,d,e,f; 1 for a,b,g,h
-L = sum over locked files of w(f)            # directly facing pairs
-T = number of pawn-attack pairs (tension instances)
-O = sum over fully-open files of w(f)
-
-if L + T + O == 0:  NEUTRAL (no pawn contact yet)
-else:               C = (L - O) / (L + T + O)   in [-1, +1]
-                    C -> +1 fully locked center, C -> -1 fully open
+L = sum of w(f) over locked files;  T = pawn-attack tension instances;
+O = sum of w(f) over fully-open files
+L + T + O == 0  ->  NEUTRAL (no pawn contact yet)
+else C = (L - O) / (L + T + O)   in [-1, +1]
 ```
-Extractor v2 already emits per-position lock_c (center locked files), lock_e (edge),
-tension, open — so C is computable on every training position and engine-side at eval time.
-
-**How a spectrum gets trained** (the open question, answered):
-You do not train the axis itself. The NNUE input already encodes every pawn's square —
-closedness is a function of the input, so ONE balanced net learns closed-vs-open evaluation
-differences from pawn structure. Splitting the axis into separate nets (e.g. closed/semi/open
-at calibrated quantiles) is available if the matrix shows the regions are evaluationally
-disjoint enough to justify capacity concentration — but hard cuts on a continuum create eval
-discontinuity at the boundaries (routing jitter), so the split needs evidence AND a ruling.
-v1: one balanced net; C is reported in the matrix and available as a routing axis later.
+Caution recorded: hard shard cuts on a continuum create eval discontinuity at boundaries —
+sharding proceeds per ruling; C remains available as a smoothing/reporting axis.
 
 ---
 
 ## 6. Training data selection
 
 - **Source**: `gambit/filtered.pgn` — decisive OTB games, winner >=2400, loser >=2000
-  (~1.53M games). **BOTH SIDES' positions (ruling 2026-09-27: "the losing side can also
-  create training worthy data" — defensive play, exchange-down saving, is the DOWN side's
-  data).** Full archive (10.3M games) is the expansion source for starved classes.
-- **Evaluations**: depth 12 minimum (fleet, all 14 sparks). Depth-1 gambit evals are OBSOLETE, never used.
+  (~1.53M games). **BOTH SIDES' positions (ruling: "the losing side can also create
+  training worthy data" — defensive play, exchange-down saving, is the DOWN side's data).**
+  Expansion source for starved classes: the full 10.3M-game archive.
+- **Evaluations**: depth 12 minimum (fleet, all 14 sparks). Depth-1 gambit evals are OBSOLETE.
 - **Moves included**: castling, en passant, threefold repetition, underpromotions — all must appear.
 - **Elo floor**: stay with 2400+ for our moves.
-- **Segmentation** (extractor v2, built and validated):
-  - Blunder boundary: eval swing >= 120cp in cp space (the v1 wp-space bug is fixed).
+- **Segmentation** (extractor v2, built and validated: 300/300 config+men, 200/200 contact ground truth):
+  - Blunder boundary: eval swing >= 120cp in cp space.
   - **Sub-division at every material change**; each sub-segment trains its own expert.
   - Exchange-move positions tagged `exch` (piece-trades data).
-  - Per-position material config + opp/same bishops + lock_c/lock_e/tension/open + men + phase.
-- **Trajectory classes** (win-probability bands, W = 1/(1+exp(-cp/361))):
-  - press 55-70, convert 70-win, equalize 45-55, defend 30-45, win 95+, collapse <30.
-  - Segments classified start-band -> end-band.
-  - **EXCLUDE draw-to-draw / same-band segments** (no skill demonstrated).
+  - Per-position: config, opp/same bishops, lock_c/lock_e/tension/open, men, phase.
+- **Trajectory classes** (W = 1/(1+exp(-cp/361))): press 55-70, convert 70-win, equalize
+  45-55, defend 30-45, win 95+, collapse <30; segments classified start-band -> end-band.
+  - **EXCLUDE draw-to-draw ONLY** (equalize_to_equalize) — same-band classes like
+    win_to_win (converting) and collapse_to_collapse (fighting) are IN (verbatim ruling:
+    "but draw to draw, I don't want").
   - **INCLUDE losing-game segments** (improving play is valuable).
-  - Eval slope computed with an EMA (operator ruling).
-- **The matrix**: (material config x trajectory) with segments/ply counts over the full dump.
-  Roles: (a) tactics-family bucket derivation, (b) per-expert data mass, (c) calibration of
-  every UCI cut point, (d) starved-class detection.
+  - Eval slope EMA'd (ruling).
+- **The matrix**: (config x trajectory) with segments/ply counts — per-expert mass,
+  cut-point calibration, starved-class detection.
+
+### 6.1 Expert data census (partial data: 13,990,350 positions = 338K games = 22% of pool)
+
+| expert | trainable now | x4 projected (filtered dump) |
+|---|---|---|
+| balanced (all shards) | 2,527,153 | 10.1M |
+| gambit | 734,339 | 2.9M |
+| N vs B | 2,024,538 | 8.1M |
+| piece-trades | 1,588,720 | 6.4M |
+| dvoretsky | 437,766 | 1.75M |
+| opp-bishops | 364,233 | 1.46M |
+| B vs R | 332,736 | 1.33M |
+| N vs R | 290,964 | 1.16M |
+| 2R vs 2R | 68,973 | 276K |
+| 2B vs R | 33,892 | 136K |
+| 2R vs Q | 27,855 | 111K |
+| 2N vs R | 28,183 | 113K |
+| 2B vs 2B | 5,116 | 20K |
+| N+B vs R / R+N vs Q / R+B vs Q | 0 | 0 (never observed) |
+
+External, in hand: tablebase 5.0M syzygy (done) · tactics 6,100,953 puzzles ·
+gambit mined pool. Reference points: 14.6M positions -> ~2000-2200 Elo;
+102M -> ~2400. Expansion plan: both-sides dump (RUNNING next, ~2x mass, adds the
+defensive side), then full archive (~6.7x games) for starved classes; synthetic
+from seeds ONLY on explicit ruling (self-play ban applies to real training).
 
 ---
 
-## 7. Pipeline (state as of this doc)
+## 7. Pipeline state
 
 | Step | State |
 |------|-------|
-| Full OTB dump on filtered.pgn | RUNNING (~18M of ~63M positions, ~9.1K pos/s) |
-| TB specialist data | COMPLETE — exactly 5,000,000 syzygy positions |
-| Gambit dataset | EXISTS (mined pool) |
-| Extractor v2 | BUILT + VALIDATED (300/300 config+men ground truth, 200/200 contact ground truth) |
-| Depth-12 fleet eval | after dump |
-| Matrix on full data | after evals |
-| Fork slots | array plumbing BUILT (any N); router being finalized to this document |
-| Per-expert .bins | after matrix + partition ruling |
-| Training | nnue-pytorch, CUDA-optimized, 20GB VRAM approved for quality |
+| Winner-only dump, filtered.pgn | RUNNING (~43M of ~63M) |
+| **Both-sides dump** | tool built + smoke-tested; AUTO-LAUNCH armed on dump completion (~126M positions) |
+| Depth-12 fleet eval | after both-sides dump |
+| Extractor v2 | BUILT + VALIDATED |
+| Expert census | DONE on partial (§6.1); rerun on full data |
+| TB specialist | COMPLETE (5.0M) |
+| Tactics puzzles | IN HAND (6.1M) — packing proposal pending (open question 1) |
+| Fork slots | array plumbing BUILT (any N); router finalizes to this document |
+| Per-expert .bins | after full census + shard-cut ruling |
+| Training | nnue-pytorch, CUDA-optimized, 20GB VRAM approved |
 | Match | SPRT: expert-MoE vs monolithic, SAME TOTAL budget + 2x/4x/8x curves |
 
-## 8. Open questions for ruling (nothing proceeds on these without the operator)
+## 8. Open questions for ruling
 
-1. Tactics gate: threshold calibration method (ROC on puzzle-vs-quiet labeled sets) and the training-target design for puzzle positions (decisive-win labeling) — proposal before packing.
-2. RESOLVED 2026-09-27: confrontation matching is RESIDUE-BASED (cancel common pieces,
-   imbalance persists in ANY material context — "in many openings the mainline is BxN,
-   which creates the N vs B imbalance"). Caveat recorded: residue conflates 2N vs N+B into
-   N vs B (same difference multiset); if 2N vs N+B must stay distinct the predicate needs
-   residue + on-board minors count.
-3. RESOLVED 2026-09-27: balanced positions are SHARDED by the amount of locked pawns
-   (operator ruling, repeated). Census distribution of center-locked files within balanced
-   (partial data): lock_c=0: 53.4%, lock_c=1: 34.0%, lock_c=2: 9.8%, lock_c=3+: 2.7%.
-   Shard cuts and count final at full-data census.
-4. Starved-class folding (with mass numbers shown first).
-5. Opening-boundary ply value (from data; UCI option).
+1. Tactics expert: puzzle packing design (decisive-win labeling of puzzle-line positions) — proposal before packing.
+2. Piece-trades routing predicate: equal-type + cross-minor capture available [READING] — confirm or override.
+3. 2N vs N+B: keep distinct (residue + on-board minors count) or fold into N vs B?
+4. Balanced shard cuts: 0/1/2/3+ per census — confirm at full-data census (3+ fold-in if starved).
+5. Starved-class folding with mass numbers (2Bv2B 20K proj; the three zero classes).
+6. Opening-boundary ply value (UCI option, from data).
 
-RESOLVED by ruling 2026-09-27: mid-queenless REMOVED (imbalance buckets + balanced handle
-queenless); tactics = one independent puzzle-trained expert outside the MoE (dual-signal,
-tactic-first gate).
+RESOLVED (record): mid-queenless REMOVED (imbalance + balanced cover it) · tactics = one
+independent puzzle-trained expert, dual-signal protocol · confrontation matching =
+residue-based · balanced sharded by locked pawns · both-sides data · draw-to-draw-only
+exclusion · exchange-down covered by NvR/BvR.
 
 ## 9. Laws (accumulated, binding)
 
@@ -240,6 +248,6 @@ tactic-first gate).
 - No symlinks for stagepacks; pkill self-match law; game-boundary splitting only (never line-based).
 - python-chess on rtx5090 is 0.31.4 (`board.result()`, not `board.outcome()`).
 - Move field unsigned (`H`) in the bin struct.
-- The failure identity is the retraining set; sampled 1.0 = noise — pass-firing gates must be
-  statistically sufficient or exhaustive.
+- The failure identity is the retraining set; sampled 1.0 = noise — pass-firing gates must
+  be statistically sufficient or exhaustive.
 - Verify deliverables against the passed datasets, not proxies.

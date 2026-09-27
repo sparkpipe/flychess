@@ -70,7 +70,25 @@ player cares only about the immediate tactical win.
    trigger:** immediate tactical win confirmed, the tactics move is the answer. Done.
 6. **No jump: no tactic** — normal positional MoE evaluation/routing.
 
-TBD calibration knobs: tactical tree depth, leaf-evaluation depth, jump size/reference.
+**Tactical tree termination (ruling):** the tree expands **until the position is QUIET** —
+no imminent trades, no other short-term tactics. Quiescence termination, not a fixed ply
+count. (Same notion as the trade/tension data tags: the tree runs through the forcing
+material and stops when the dust settles.)
+
+**Leaf positional depth (ruling):** the depth of the positional search at the end of the
+tactical leaf is a **RUNTIME PARAMETER** (UCI option).
+
+**Time management (ruling) — trajectory-driven:**
+- **Investment phase:** early, we invest our time to get as good of a position as possible.
+- **Harvest phase:** at some point we switch to "make reasonable moves quickly" — the hope
+  is the time investment that got us into time trouble created a good position.
+- **Critical-area rule:** if the position is LOSING win percentage and getting close to the
+  critical area **40%**, we spend MORE time to try to get back to **45%+**.
+- Constants given: 40% critical, 45% recovery. Investment→harvest switch point: runtime
+  parameter. The win% trajectory over the game (EMA'd) drives the policy — same trajectory
+  signal as the training-data bands (45-55 equalize, 30-45 defend).
+
+TBD calibration knobs: jump size/reference for the trigger.
 The tactics expert is puzzle-trained (pure tactics, blind to material balance/eval
 trajectory/phase) and runs first at every evaluation.
 

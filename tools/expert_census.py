@@ -17,7 +17,12 @@ RESIDUE_RAW = {
     ("Q", "RN"): "RNvQ",
     ("Q", "RB"): "RBvQ",
 }
-RESIDUE = {tuple(sorted(k)): v for k, v in RESIDUE_RAW.items()}
+# canonicalize BOTH the pair order AND the inner string order (alphabetical),
+# matching how res_w/res_b strings are built (sorted() per piece)
+RESIDUE = {
+    tuple(sorted(("".join(sorted(a)), "".join(sorted(b))))): v
+    for (a, b), v in RESIDUE_RAW.items()
+}
 
 experts = defaultdict(lambda: [0, 0])
 balanced_lock = defaultdict(int)

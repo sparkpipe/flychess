@@ -47,7 +47,7 @@ Standing directives (violations are program-stopping):
 |---|--------|-------------|-------------------|---------------|
 | 1 | **opening-gambit** | Early sacrificed or grabbed material; initiative-first play. | game_ply < opening bound AND asymmetric residue | existing gambit dataset (mined pool) + early-asymmetric segments |
 | 2 | **balanced** (sharded) | Symmetric material residue, no listed confrontation. **Sharded by the amount of locked pawns** (ruling, §5): lock_c = 0 / 1 / 2 / 3+ | symmetric residue, no confrontation, past opening | balanced segments, sharded by lock_c at packing |
-| 3 | **piece-trades** | The trade decisions: positions with an equal-value capture available, and the exchange moves themselves (material-change boundaries). The expert in WHEN to trade. | equal-type or cross-minor capture available [READING — ruling pending] | `exch`-tagged positions + pre-trade tension positions |
+| 3 | **exchanges** (RESOLVED) | The transient moves of a trade: "the position is in one category, stuff happens to material balance, it settles down to the new material balance — the 'stuff happens' moves is the exchanges subset." Any move that changes which category a position is in and is not the stable end-state position. **These positions ALSO stay in the original material-balance training** (dual membership — the stable-category expert keeps them). | transient between stable material balances (category changed, not settled) | upward-slope positions during transitions, tagged `exch` by extractor v2 |
 | 4 | **endgame-dvoretsky** | Practical endgames, 6-10 men, no listed confrontation. CONFIRMED. | 6 <= men <= 10 (after confrontation table) | dvoretsky-region segments |
 | 5 | **endgame-tablebase** | Exact endgames, <=5 men. CONFIRMED. Syzygy training data COMPLETE (exactly 5,000,000 positions). | men <= 5 — absolute, first check | syzygy (done) |
 
@@ -55,7 +55,7 @@ Standing directives (violations are program-stopping):
 
 | # | Expert | Description |
 |---|--------|-------------|
-| 6 | **pure tactics** | ONE independent expert trained on the tactics puzzles (Lichess DB, 6,100,953 theme-tagged) — regardless of material balance, eval trajectory, phase. It only sees pure tactics. It exists OUTSIDE the MoE (dual-signal protocol below). |
+| 6 | **pure tactics** | ONE independent expert trained on the tactics puzzles (Lichess DB, 6,100,953 theme-tagged) — regardless of material balance, eval trajectory, phase. It only sees pure tactics. It exists OUTSIDE the MoE (dual-signal protocol below). Packing (RESOLVED): a puzzle is a set of moves that COMBINE into a winning combination — the ENTIRE combination is correct (made to be); secondary moves may also work — pack the full line. |
 
 **Dual-signal player (ruling):** the structured-strategy MoE plays general-concept chess —
 eval slope improvement, slowly squeezing to checkmate — while the tactics player cares only
@@ -98,7 +98,7 @@ confrontations).
 | # | Expert | Residue (either orientation) | Notes |
 |---|--------|------------------------------|-------|
 | 7 | **N vs B** | N v B | the BxN-mainline mass; also absorbs 2N vs N+B by residue (caveat below) |
-| 8 | **2N vs N+B** | (see caveat) | same residue multiset as N vs B — keeping it distinct needs residue + on-board minors count (open question 3) |
+| 8 | **2N vs N+B** | MERGED into N vs B (ruling 2026-09-27) | |
 | 9 | **2B vs 2B** | symmetric, bishops-only minors both pairs | symmetric class (fires on exact structure, not residue) |
 | 10 | **N vs R** | R v N | INCLUDES exchange-down play, both sides ("saving the draw being an exchange down is a super important skill" — the DOWN side's data comes from the both-sides dump) |
 | 11 | **B vs R** | R v B | same, includes exchange-down |
@@ -196,18 +196,25 @@ decisive games only — both-sides + full archive multiply further):
 |---|---|---|---|---|
 | balanced (all shards) | 3,505,574 | 552,837 | 2.21M | ~29.6M |
 | gambit | 3,041,084 | 538,777 | 2.16M | ~28.9M |
-| N vs B | 2,876,402 | 360,706 | 1.44M | ~19.3M |
-| piece-trades | 2,679,183 | 129,442 | 518K | ~6.9M |
-| dvoretsky | 495,617 | 34,780 | 139K | ~1.9M |
+| N vs B (incl. 2N vs N+B) | 2,876,402 | 360,706 | 1.44M | ~19.3M |
+| exchanges | 2,613,587 | 127,045 | 508K | ~6.8M |
+| dvoretsky | 471,518 | 32,086 | 128K | ~1.7M |
 | opp-bishops | 459,298 | 52,365 | 209K | ~2.8M |
 | B vs R | 367,499 | 26,654 | 107K | ~1.4M |
 | N vs R | 321,449 | 21,074 | 84K | ~1.1M |
+| N+B vs R | 131,366 | 11,692 | 47K | ~627K |
 | 2R vs 2R | 87,947 | 9,011 | 36K | ~483K |
+| R+B vs Q | 46,327 | 3,607 | 14K | ~193K |
 | 2B vs R | 36,707 | 2,390 | 9.6K | ~128K |
+| R+N vs Q | 36,241 | 2,317 | 9.3K | ~124K |
 | 2R vs Q | 31,432 | 3,032 | 12K | ~162K |
 | 2N vs R | 31,429 | 2,740 | 11K | ~147K |
 | 2B vs 2B | 6,453 | 891 | 3.6K | ~48K |
-| N+B vs R / R+N vs Q / R+B vs Q | 0 | 0 | 0 | 0 (never observed) |
+
+(2026-09-27 census-bug fix: N+B vs R / R+N vs Q / R+B vs Q previously read as zero —
+residue keys were chess-ordered while lookups were alphabetically sorted; exactly the
+three two-letter classes never matched. Operator caught it: "that is a VERY COMMON
+occurrence." Engine-side router was never affected — it compares piece counts.)
 
 External, in hand: tablebase 5.0M syzygy (done) · tactics 6,100,953 puzzles ·
 gambit mined pool. Reference points: 14.6M positions -> ~2000-2200 Elo;
@@ -235,12 +242,16 @@ from seeds ONLY on explicit ruling (self-play ban applies to real training).
 
 ## 8. Open questions for ruling
 
-1. Tactics expert: puzzle packing design (decisive-win labeling of puzzle-line positions) — proposal before packing.
-2. Piece-trades routing predicate: equal-type + cross-minor capture available [READING] — confirm or override.
-3. 2N vs N+B: keep distinct (residue + on-board minors count) or fold into N vs B?
-4. Balanced shard cuts: 0/1/2/3+ per census — confirm at full-data census (3+ fold-in if starved).
-5. Starved-class folding with mass numbers (2Bv2B 20K proj; the three zero classes).
-6. Opening-boundary ply value (UCI option, from data).
+RESOLVED 2026-09-27: (1) puzzle packing = entire combination, all correct, secondary
+solutions may also work; (2) exchanges = transient category-change moves, NOT routed away —
+dual membership with the stable-category training; (3) 2N vs N+B merged into N vs B;
+(4) balanced shards 0/1/2/3+ confirmed.
+
+Still open:
+1. Starved-class folding with mass numbers shown first (2Bv2B ~48K full-expansion proj is
+   the thinnest).
+2. Opening-boundary ply value (UCI option, from data).
+3. Tactics-gate win%-jump size/reference.
 
 RESOLVED (record): mid-queenless REMOVED (imbalance + balanced cover it) · tactics = one
 independent puzzle-trained expert, dual-signal protocol · confrontation matching =

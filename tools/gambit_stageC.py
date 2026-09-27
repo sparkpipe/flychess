@@ -26,9 +26,11 @@ JUMP_MIN = float(os.environ.get("JUMP_MIN", "0.90"))
 
 
 def main():
+    SFX = os.environ.get("FENS_SFX", "")
     traj = {}
     order = []
-    with open(f"{G}/evals.txt") as fe, open(f"{G}/fens.txt") as ff:
+    with open(f"{G}/evals{SFX}.txt") as fe, \
+            open(f"{G}/fens{SFX}.txt") as ff:
         for ev, ff_line in zip(fe, ff):
             gid, ply, w = ev.split()
             fen = ff_line.rstrip("\n").split(" ", 3)[3]
@@ -76,7 +78,7 @@ def main():
         matched.append({"gid": gid, "trough": round(wmin, 3),
                         "trough_ply": pmin, "peak": round(wlate, 3),
                         "n_rows": len(rows)})
-        with open(f"{G}/gambit_fens.txt", "a") as f:
+        with open(f"{G}/gambit_fens{SFX}.txt", "a") as f:
             for r in rows:
                 f.write(r + "\n")
         if len(matched) % 500 == 0:
@@ -86,7 +88,7 @@ def main():
                       "total_rows": sum(m["n_rows"]
                                         for m in matched),
                       "peak_top5": peaks[:5]}), flush=True)
-    json.dump(matched, open(f"{G}/games.json", "w"))
+    json.dump(matched, open(f"{G}/games{SFX}.json", "w"))
     print("STAGE-C-COMPLETE", flush=True)
 
 

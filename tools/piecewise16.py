@@ -78,6 +78,40 @@ def main():
     opt = torch.optim.Adam(params, lr=LR)
     rng = random.Random(1)
 
+    # pause/resume (operator condition for spark deployment): full
+    # state (flies+opt+rng+step) saved every PW_CKPT_EVERY and on
+    # SIGTERM; PW_CKPT=path enables
+    CKPT = os.environ.get("PW_CKPT", "")
+    CK_EVERY = int(os.environ.get("PW_CKPT_EVERY", "250"))
+    step0 = 0
+
+    def save_ckpt(step):
+        if not CKPT:
+            return
+        torch.save({"step": step,
+                    "flies": [f.state_dict() for f in flies],
+                    "opt": opt.state_dict(),
+                    "rng": rng.getstate()}, CKPT)
+
+    if CKPT and os.path.exists(CKPT):
+        st = torch.load(CKPT, map_location=fc.DEV,
+                        weights_only=False)
+        for f, sd in zip(flies, st["flies"]):
+            f.load_state_dict(sd)
+        opt.load_state_dict(st["opt"])
+        rng.setstate(st["rng"])
+        step0 = st["step"]
+        print(json.dumps({"RESUMED_FROM": step0}), flush=True)
+
+    import signal
+
+    def _term(sig, fr):
+        save_ckpt(step_holder[0])
+        print(json.dumps({"PAUSED_AT": step_holder[0]}), flush=True)
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, _term)
+    step_holder = [step0]
+
     def pack(rows_sl):
         B = len(rows_sl)
         Ls = [int(r["_pre"][0]["fen_off"][r["_pre"][1] + 1]
@@ -154,7 +188,7 @@ def main():
         return J, app, valid, Ls, mus, allT, sm
 
     t0 = time.time()
-    step = 0
+    step = step0
     while step < CAP:
         batch = rng.sample(train_rows, min(8, len(train_rows)))
         J, app, valid, Ls, mus, allT, sm = run_batch(batch)
@@ -193,6 +227,9 @@ def main():
             torch.nn.utils.clip_grad_norm_(f.parameters(), 1.0)  # fly of ~1/16 lr
         opt.step()
         step += 1
+        step_holder[0] = step
+        if CKPT and step % CK_EVERY == 0:
+            save_ckpt(step)
         if step % 50 == 0:
             tr_ok = tr_n = 0
             with torch.no_grad():

@@ -65,6 +65,9 @@ def pack_board(b):
 def main():
     flyfeat_cb.feat_vec(chess.Board())
     puzzles = [json.loads(l) for l in open(EVAL)]
+    N_LIM = int(os.environ.get("MOF_LI_N", "0"))
+    if N_LIM:
+        puzzles = puzzles[:N_LIM]
     N = len(puzzles)
     boards = [chess.Board(p["fen"]) for p in puzzles]
     packs = [pack_board(b) for b in boards]
@@ -82,8 +85,8 @@ def main():
     meta = json.load(open(f"{WIT}/meta.json"))
     dims = json.load(open(f"{WIT}/dims.json"))
     n_fly = min(138, len(state))
-    Wl = np.zeros((n_fly, N, 64), np.float16)      # pad to 64 moves
-    Ls = [p[0].shape[1] for p, _ in packs]
+    Wl = np.zeros((n_fly, N, 64), np.float32)      # pad to 64 moves
+    Ls = [len(p[1]) for p, _ in packs]             # len(mvs) = truth
     Xl = np.stack([p[0][0] for p, _ in packs])
 
     def apply_fly(f):
@@ -103,12 +106,13 @@ def main():
     t0 = time.time()
     for fi in range(n_fly):
         f = {"idx": z[f"m{fi:05d}_idx"], "val": z[f"m{fi:05d}_val"]}
-        apply_fly(f)
+        with torch.no_grad():
+            apply_fly(f)
         for s in range(0, N, 512):
             e = min(s + 512, N)
             chunks = packs[s:e]
             B = len(chunks)
-            M = max(c[0].shape[1] for c in chunks)
+            M = 64                                  # legal moves never exceed 64
             slotb = np.zeros((B, M), np.int64)
             pcrowb = np.zeros((B, M), np.int64)
             mfb = np.zeros((B, M, 17), np.float32)
@@ -116,11 +120,10 @@ def main():
             psb = np.zeros((B, M), np.float32)
             thb = np.zeros((B, M), np.float32)
             ps2b = np.zeros((B, M), np.float32)
-            xs = np.zeros((B, packs[0][0].shape[1]), np.float32)
-            for b_i, (arrays, _) in enumerate(chunks):
+            xs = np.zeros((B, Xl.shape[1]), np.float32)
+            for b_i, (arrays, mvs_l) in enumerate(chunks):
                 x, slot, pcrow, mfm, mask, psb_, thb_, ps2b_ = arrays
-                L = x.shape[0] * 0 + maskb.shape[1] * 0 + mask[0].sum()
-                L = int(mask.sum())
+                L = len(mvs_l)
                 slotb[b_i, :L] = slot[0, :L]
                 pcrowb[b_i, :L] = pcrow[0, :L]
                 mfb[b_i, :L] = mfm[0, :L]
@@ -140,13 +143,14 @@ def main():
                               "elapsed_s": round(time.time() - t0)}),
                   flush=True)
     # base model scores (init) for the baseline
-    for k, p in base.named_parameters():
-        p.copy_(base_state[k])
+    with torch.no_grad():
+        for k, p in base.named_parameters():
+            p.copy_(base_state[k])
     for s in range(0, N, 512):
         e = min(s + 512, N)
         chunks = packs[s:e]
         B = len(chunks)
-        M = max(c[0].shape[1] for c in chunks)
+        M = 64                                      # legal moves never exceed 64
         slotb = np.zeros((B, M), np.int64)
         pcrowb = np.zeros((B, M), np.int64)
         mfb = np.zeros((B, M, 17), np.float32)
@@ -154,7 +158,7 @@ def main():
         psb = np.zeros((B, M), np.float32)
         thb = np.zeros((B, M), np.float32)
         ps2b = np.zeros((B, M), np.float32)
-        xs = np.zeros((B, packs[0][0].shape[1]), np.float32)
+        xs = np.zeros((B, Xl.shape[1]), np.float32)
         for b_i, (arrays, _) in enumerate(chunks):
             x, slot, pcrow, mfm, mask, psb_, thb_, ps2b_ = arrays
             L = int(mask.sum())
@@ -200,13 +204,21 @@ def main():
     fly_midx = [np.array(m, dtype=np.int64) if m else np.zeros(0, int)
                 for m in fly_midx]
 
+    if os.environ.get("MOF_DEBUG"):
+        for pi in range(min(3, N)):
+            mus = [m.uci() for m in boards[pi].legal_moves]
+            j = int(np.argmax(base_scores[pi]))
+            print("DEBUG base", pi, mus[j], flush=True)
     res = []
     for pi, p in enumerate(puzzles):
         L = Ls[pi]
-        toks = np.zeros((1, L, 17 + n_fly), np.float32)
+        toks = np.zeros((1, 64, 17 + n_fly), np.float32)
+        mf_pi = packs[pi][0][3]                 # (1, L, 17) move feats
         toks[0, :L, :17] = np.asarray(
-            packs[pi][0][2][0, :L], dtype=np.float32)
-        toks[0, :L, 17:] = Wl[:n_fly, pi, :L].T
+            mf_pi[0, :L], dtype=np.float32)
+        toks[0, :L, 17:] = np.nan_to_num(
+            Wl[:n_fly, pi, :L].T, nan=0.0, posinf=30000.0,
+            neginf=-30000.0)
         xb = Xl[pi][None, :]
         mask = np.zeros((1, 64), bool)
         mask[0, :L] = True
@@ -216,6 +228,14 @@ def main():
                            torch.from_numpy(mask).to(fc.DEV))
         logits = logits[0, :L].cpu().numpy()
         mus = [m.uci() for m in boards[pi].legal_moves]
+        if os.environ.get("MOF_DEBUG") and pi < 3:
+            print("DEBUG reader", pi,
+                  "wit_std", round(float(np.nanstd(
+                      Wl[:n_fly, pi, :L])), 3),
+                  "logit_range", round(float(logits.min()), 2),
+                  round(float(logits.max()), 2),
+                  "top3", [mus[j] for j in
+                           np.argsort(-logits)[:3]], flush=True)
         top5 = [mus[j] for j in np.argsort(-logits)[:5]]
         pick_reader = top5[0]
         # kNN router baseline

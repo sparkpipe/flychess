@@ -56,9 +56,7 @@ for line in open(sys.argv[1]):
         if symmetric:
             np_w = "".join(sorted(x for x in w if x != "P"))
             np_b = "".join(sorted(x for x in b if x != "P"))
-            if np_w == "RR" and np_b == "RR":
-                e = "2Rv2R"
-            elif r.get("bishops_i") == "opp_bishops":
+            if r.get("bishops_i") == "opp_bishops":
                 e = "oppBishops"
         else:
             e = RESIDUE.get(kres)  # None = unlisted asymmetry -> falls through
@@ -67,19 +65,18 @@ for line in open(sys.argv[1]):
             e = "dvoretsky"
         elif r["exch"]:
             e = "pieceTrades-approx"
-        elif r["ply"] < 24:
-            e = "gambit-earlyasym"
+        elif r["ply"] < 24 and not symmetric:
+            e = "gambit-earlyasym"   # asymmetric early only (design §3.1)
         else:
             e = "balanced"
             lk = r["lock_c"] if r["lock_c"] < 3 else 3
             balanced_lock[lk] += 1
 
     experts[e][0] += 1
-    # qualifying population: UPWARD band crossing = demonstrated improvement
-    # (40->55 helps; 55->60 same-band does not). Game result irrelevant.
-    order = {"collapse": 0, "defend": 1, "equalize": 2, "press": 3,
-             "convert": 4, "win": 5}
-    if order[b1] > order[b0]:
+    # qualifying population: ANY band crossing = demonstrated improvement by
+    # SOMEONE (40->55 helps; 55->60 same-band does not). With wp in white
+    # perspective, a crossing down = the black side improving. Result-agnostic.
+    if b0 != b1:
         experts[e][1] += 1
         if e == "balanced":
             balanced_lock_qual[lk if lk < 3 else 3] += 1

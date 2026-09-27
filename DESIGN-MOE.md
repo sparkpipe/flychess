@@ -202,8 +202,12 @@ Balanced shard breakdown (total / qualifying / x4-qualifying projection):
 (The 3+ shard at ~98K filtered projection folds into 2+ unless the full-archive expansion
 sustains it — per shard ruling, cuts confirmed 0/1/2/3+ and revisited at full census.)
 
-Qualifying population (upward band crossings; partial data, 22% of pool; winner-side
-decisive games only — both-sides + full archive multiply further):
+Qualifying population (ANY band crossing = demonstrated improvement by either side —
+downward in white-perspective wp = the black side improving; same-band excluded; partial
+data, 22% of pool, winner-side decisive only — both-sides + full archive multiply further).
+Gambit = early + ASYMMETRIC only (2,336 packed incl. dual-exchanges; the mined gambit pool
+is essential for this expert). Exchanges (dual-membership bin): 383,942 packed on partial.
+Packer: tools/pack_expert_bins.py, validated — all class counts match census exactly.
 
 | expert | total positions | qualifying now | x4 proj (filtered) | x53.6 proj (both sides + full archive) |
 |---|---|---|---|---|

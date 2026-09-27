@@ -31,7 +31,7 @@ D_MODEL = 256
 EPOCHS = 30
 BS = 64
 LR = 1e-3
-HOLDOUT = 1000
+HOLDOUT = int(os.environ.get("READER_HOLDOUT", "0"))
 NF = int(os.environ.get("MOF_N", "138"))      # witness flies used
 os.makedirs(OUT, exist_ok=True)
 
@@ -143,6 +143,9 @@ def main():
     def eval_set(idxs):
         model.eval()
         hit_ap = hit_best = 0
+        if not idxs:
+            model.train()
+            return 0.0, 0.0
         with torch.no_grad():
             for s in range(0, len(idxs), 256):
                 chunk = idxs[s:s + 256]
@@ -174,7 +177,7 @@ def main():
             loss.backward()
             opt.step()
             tot += float(loss)
-        ha, hb = eval_set(hold_l)
+        ha, hb = eval_set(hold_l) if hold_l else (0.0, 0.0)
         print(json.dumps({"epoch": ep, "loss": round(tot, 3),
                           "hold_top1_approved": ha,
                           "hold_top1_exact": hb,

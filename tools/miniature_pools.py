@@ -27,7 +27,7 @@ from multiprocessing import Pool
 sys.path.insert(0, "/home/spec/chess-lab/tools")
 from degm_pools import band, SF
 
-PGN = "/home/spec/chess-lab/games/lumbras_otb_complete.pgn"
+PGN = "/home/spec/chess-lab/games/LumbrasGigaBase_OTB_Complete.pgn"
 OUTP = "/home/spec/chess-lab/tbpools/MINI.jsonl"
 CAP_JOBS = 80000
 CAP_ROWS = 40000
@@ -76,7 +76,7 @@ def collect():
             # quality bar: winner 2400+/loser 2000+; pre-rating-era
             # games (no Elo headers at all) pass — the SF top-band rule
             # is the quality gate there
-            elo_given = not (welo == 0 and belo == 0)
+            elo_given = not (wel == 0 and bel == 0)
             if elo_given and (welo < WIN_ELO or lelo < LOSE_ELO):
                 continue
             b = g.board()
@@ -94,21 +94,20 @@ def collect():
                     b.push(mv)
                 except Exception:
                     break
-                mv_no += 1
-                plies.append((b.fen(), mv, mv_no, winner))
+                mv_no += 1                      # counts PLIES
+                move_no = (mv_no + 1) // 2      # full moves
+                plies.append((b.fen(), mv, mv_no, move_no, winner))
                 bal = sign * material(b)
-                if mv_no <= 25 and bal >= 5:
-                    finish = mv_no
+                if move_no <= 25 and bal >= 5:
+                    finish = mv_no              # truncate at the jump
                     break
                 if node.is_end():
-                    if mv_no <= 50 and mv_no <= 50:   # <=25 moves
-                        pass
-                    if mv_no <= 25 * 2 and mv_no / 2 <= 25:
+                    if move_no <= 25:
                         finish = mv_no
                     break
             if finish is None:
                 continue
-            for fen, mv, mv_no, w in plies:
+            for fen, mv, mv_no, move_no, w in plies:
                 if mv_no > finish:
                     break
                 turn = chess.Board(fen).turn

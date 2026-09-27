@@ -5,17 +5,19 @@ import json
 import sys
 from collections import defaultdict
 
+# merged classes (operator rulings 2026-09-27):
+#   2NvR + NBvR + 2BvR -> Rv2minors
+#   2RvQ + RNvQ + RBvQ -> Qvmaterial
 RESIDUE_RAW = {
     ("B", "N"): "NvB",
-    ("NN", "NB"): "2NvNB",
     ("R", "N"): "NvR",
     ("R", "B"): "BvR",
-    ("R", "NN"): "2NvR",
-    ("R", "NB"): "NBvR",
-    ("R", "BB"): "2BvR",
-    ("Q", "RR"): "2RvQ",
-    ("Q", "RN"): "RNvQ",
-    ("Q", "RB"): "RBvQ",
+    ("R", "NN"): "Rv2minors",
+    ("R", "NB"): "Rv2minors",
+    ("R", "BB"): "Rv2minors",
+    ("Q", "RR"): "Qvmaterial",
+    ("Q", "RN"): "Qvmaterial",
+    ("Q", "RB"): "Qvmaterial",
 }
 # canonicalize BOTH the pair order AND the inner string order (alphabetical),
 # matching how res_w/res_b strings are built (sorted() per piece)

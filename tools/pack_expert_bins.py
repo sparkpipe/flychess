@@ -25,9 +25,10 @@ import chess
 RESIDUE = {
     tuple(sorted(("".join(sorted(a)), "".join(sorted(b))))): name
     for (a, b), name in {
+        # merged (rulings): rook-vs-2-minors in any form; queen-vs-material
         ("N", "B"): "nvb", ("R", "N"): "nvr", ("R", "B"): "bvr",
-        ("R", "NN"): "n2vr", ("R", "NB"): "nbr", ("R", "BB"): "b2vr",
-        ("Q", "RR"): "r2vq", ("Q", "RN"): "rnvq", ("Q", "RB"): "rbvq",
+        ("R", "NN"): "rv2m", ("R", "NB"): "rv2m", ("R", "BB"): "rv2m",
+        ("Q", "RR"): "qvmat", ("Q", "RN"): "qvmat", ("Q", "RB"): "qvmat",
     }.items()
 }
 

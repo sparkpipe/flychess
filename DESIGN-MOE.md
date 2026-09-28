@@ -45,7 +45,7 @@ Standing directives (violations are program-stopping):
 
 | # | Expert | Description | Routing predicate | Training data |
 |---|--------|-------------|-------------------|---------------|
-| 1 | **opening-gambit** | Early sacrificed or grabbed material; initiative-first play. | game_ply < opening bound AND asymmetric residue | existing gambit dataset (mined pool) + early-asymmetric segments |
+| ~~1~~ | **opening-gambit — REMOVED (ruling 2026-09-28)** | "No need for a gambit expert, it just blends into all the experts." The 94,395 matched gambit games (87,294 elo'd + 7,101 historical incl. Morphy) are AUGMENTATION: winner positions from the winner's first move to the wp-70% crossing, classified by the usual cascade, packed into the matching expert bins — duplicates with the main set are deliberate (gambit-style upweighting). Contention measured: 84.0% balanced L0/L1, 11.3% N vs B. | n/a (no slot) | ~1.5M winner-arc positions, depth-12 eval queued |
 | 2 | **balanced** (sharded) | Symmetric material residue, no listed confrontation. **Sharded by the amount of locked pawns** (ruling, §5): lock_c = 0 / 1 / 2 / 3+ | symmetric residue, no confrontation, past opening | balanced segments, sharded by lock_c at packing |
 | 3 | **exchanges** (RESOLVED) | The transient moves of a trade: "the position is in one category, stuff happens to material balance, it settles down to the new material balance — the 'stuff happens' moves is the exchanges subset." Any move that changes which category a position is in and is not the stable end-state position. **These positions ALSO stay in the original material-balance training** (dual membership — the stable-category expert keeps them). | transient between stable material balances (category changed, not settled) | upward-slope positions during transitions, tagged `exch` by extractor v2 |
 | 4 | **endgame-dvoretsky** | Practical endgames, 6-10 men, no listed confrontation. CONFIRMED. | 6 <= men <= 10 (after confrontation table) | dvoretsky-region segments |
@@ -124,7 +124,7 @@ no jump → continue.
 2. confrontation residue table (§3.3) → its expert
 3. men <= 10 → **dvoretsky** (general practical endgame, no confrontation)
 4. equal-value capture available → **piece-trades**
-5. game_ply < opening bound AND asymmetric residue → **opening-gambit**
+5. (removed — gambit is augmentation data, not a route)
 6. symmetric residue → **balanced**, sharded by lock_c (§5)
 
 Opening boundary ply: UCI option, calibrated from data. No other free constants.

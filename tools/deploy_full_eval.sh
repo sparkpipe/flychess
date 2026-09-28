@@ -21,7 +21,7 @@ for N in $NODES; do
   if ! timeout 8 ssh -o ConnectTimeout=6 "$N" true 2>/dev/null; then
     echo "$N UNREACHABLE"; continue
   fi
-  ssh "$N" "mkdir -p ~/extnvme/phase-moe/otb && pkill -f otb_eval_fleet 2>/dev/null; rm -f ~/extnvme/phase-moe/otb/evals_w*.txt ~/extnvme/phase-moe/otb/worker_*.log; true"
+  ssh "$N" "mkdir -p ~/extnvme/phase-moe/otb && pkill -f \"otb_eval_[f]leet\" 2>/dev/null; sleep 1; rm -f ~/extnvme/phase-moe/otb/evals_w*.txt ~/extnvme/phase-moe/otb/worker_*.log; true"
   scp -q "$STAGE/shard_$id" "$N:~/extnvme/phase-moe/otb/shard.txt" || { echo "$N scp FAILED"; continue; }
   scp -q /home/spec/chess-lab/tools/otb_eval_fleet.py "$N:~/extnvme/phase-moe/" || { echo "$N script FAILED"; continue; }
   ssh "$N" "python3 -c 'import chess' 2>/dev/null || python3 -m pip install --break-system-packages -q python-chess" || true

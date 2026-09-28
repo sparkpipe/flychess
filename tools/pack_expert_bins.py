@@ -161,8 +161,10 @@ def main():
             files[name] = open(os.path.join(outdir, name + ".bin"), "wb")
         return files[name]
 
-    def flush_piece(buf, expert):
-        for rec, exch, _wp in buf:
+    def flush_piece(buf, _unused):
+        # PER-POSITION classification (ruling (b)): each record packs under
+        # its own position's class — matches engine routing exactly
+        for rec, exch, expert, _wp in buf:
             fout(expert).write(rec)
             counts[expert] += 1
             if exch:               # dual membership: also the exchanges expert
@@ -208,7 +210,7 @@ def main():
                 continue
             piece_buf.append((struct.pack(
                 "<32shHHbB", pack_sfen(board), cp, pack_move(mv),
-                board.fullmove_number, 0, 0), r["exch"], r["wp"]))
+                board.fullmove_number, 0, 0), r["exch"], expert, r["wp"]))
 
     for fh in files.values():
         fh.close()

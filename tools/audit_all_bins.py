@@ -58,9 +58,11 @@ def classify_fen(board):
     resb = "".join(sorted(sum(([k] * max(0, cb[k] - cw[k]) for k in "QRBN"), [])))
     kres = tuple(sorted((resw, resb)))
     sym = resw == "" and resb == ""
-    RES = {("B", "N"): "nvb", ("N", "R"): "nvr", ("B", "R"): "bvr",
-           ("NN", "R"): "rv2m", ("BN", "R"): "rv2m", ("BB", "R"): "rv2m",
-           ("Q", "RR"): "qvmat", ("Q", "RN"): "qvmat", ("Q", "RB"): "qvmat"}
+    RES_RAW = {("B", "N"): "nvb", ("R", "N"): "nvr", ("R", "B"): "bvr",
+               ("R", "NN"): "rv2m", ("R", "NB"): "rv2m", ("R", "BB"): "rv2m",
+               ("Q", "RR"): "qvmat", ("Q", "RN"): "qvmat", ("Q", "RB"): "qvmat"}
+    RES = {tuple(sorted(("".join(sorted(a)), "".join(sorted(b))))): v
+           for (a, b), v in RES_RAW.items()}
     if not sym and kres in RES:
         return RES[kres]
     if sym and wcol and bcol and \
@@ -204,7 +206,8 @@ def main():
                 t.write("  ep=%d O-O=%d O-O-O=%d promo=%s promo_caps=%d checks=%d\n"
                         % (st["ep"], st["castle_OO"], st["castle_OOO"],
                            dict(st["promo"]), st["promo_captures"], st["checks"]))
-        j.dump(jdata, j, indent=1)
+        import json as _json
+        _json.dump(jdata, j, indent=1)
     print("AUDIT: %d bins, %d records -> %s.txt/.json" % (len(files), total, OUT))
     print("FULL-AUDIT-COMPLETE")
 

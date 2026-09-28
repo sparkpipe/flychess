@@ -27,7 +27,7 @@ import chess.engine
 from pack_expert_bins import (GROUPS, wp_group, CLIMB, assign, pack_sfen,
                               pack_move, HUFF)
 
-SEG = sys.argv[1]
+SEG = sys.argv[1] if len(sys.argv) > 1 else ""
 N_PER = int(sys.argv[2]) if len(sys.argv) > 2 else 12
 SF = os.path.expanduser("/home/spec/Stockfish/src/stockfish")
 

@@ -415,9 +415,6 @@ class Worker {
     std::array<Eval::NNUE::AccumulatorStack, PhaseMoESlots>  accumulatorStacks;  // phase-moe
     std::array<Eval::NNUE::AccumulatorCaches, PhaseMoESlots> refreshTables;
 
-    // phase-moe routing cut points, refreshed at search start
-    int moeOpeningPly, moeLockCut;
-    bool moeOppTactics;
 
     friend class Stockfish::ThreadPool;
     friend class SearchManager;

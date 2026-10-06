@@ -57,6 +57,8 @@ int MaxThreads = std::max(1024, 4 * int(get_hardware_concurrency()));
 constexpr NumaAutoPolicy DefaultNumaPolicy = BundledL3Policy{32};
 
 Engine::Engine(std::optional<std::filesystem::path> path) :
+    // phase-moe debug staging
+
     binaryDirectory(path ? CommandLine::get_binary_directory(*path) : std::filesystem::path{}),
     numaContext(NumaConfig::from_system(DefaultNumaPolicy)),
     states(new std::deque<StateInfo>(1)),
@@ -73,57 +75,33 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
                  Eval::NNUE::EvalFile{std::nullopt, ""},
                  Eval::NNUE::EvalFile{std::nullopt, ""},
                  Eval::NNUE::EvalFile{std::nullopt, ""},
-                 Eval::NNUE::EvalFile{std::nullopt, ""},
-                 Eval::NNUE::EvalFile{std::nullopt, ""},
-                 Eval::NNUE::EvalFile{std::nullopt, ""},
-                 Eval::NNUE::EvalFile{std::nullopt, ""},
-                 Eval::NNUE::EvalFile{std::nullopt, ""},
-                 Eval::NNUE::EvalFile{std::nullopt, ""},
-                 Eval::NNUE::EvalFile{std::nullopt, ""},
-                 Eval::NNUE::EvalFile{std::nullopt, ""},
                  Eval::NNUE::EvalFile{std::nullopt, ""}},  // phase-moe
     networks{{LazyNumaReplicatedSystemWide<NN::Network>(
                 numaContext, get_default_network(networkFiles[0])),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[1])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[2])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[3])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[4])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[5])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[6])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[7])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[8])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[9])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[10])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[11])),
+                numaContext, std::make_unique<NN::Network>()),
               LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[12])),
-              LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[13])),
-              LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[14])),
-              LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[15])),
-              LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[16])),
-              LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[17])),
-              LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[18])),
-              LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[19])),
-              LazyNumaReplicatedSystemWide<NN::Network>(
-                numaContext, get_default_network(networkFiles[20]))}} {  // phase-moe
+                numaContext, std::make_unique<NN::Network>())}} {  // phase-moe
 
     pos.set(StartFEN, false, &states->back());
 
@@ -209,10 +187,6 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
           return std::nullopt;
       }));
 
-    // phase-moe routing cut points — calibrated from the full-data matrix, not frozen
-    options.add("PhaseMoeOpeningPly", Option(24, 0, 80));
-    options.add("PhaseMoeLockCut", Option(1, 0, 4));
-    options.add("PhaseMoeOppBishopsToTactics", Option(true));
 
     threads.clear();
     threads.ensure_network_replicated();
@@ -334,7 +308,12 @@ void Engine::resize_threads() {
                    &networks[4],
                    &networks[5],
                    &networks[6],
-                   &networks[7]}},
+                   &networks[7],
+                   &networks[8],
+                   &networks[9],
+                   &networks[10],
+                   &networks[11],
+                   &networks[12]}},
                  &netsLoaded},
                 updateContext);
 

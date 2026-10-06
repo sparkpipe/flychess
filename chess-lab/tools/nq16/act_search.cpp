@@ -1945,12 +1945,22 @@ TimePoint Search::Worker::elapsed() const {
 // the side to move.
 Value Search::Worker::evaluate(const Position& pos) {
     static const int dbgMode = []() {  // phase-moe debug: 0=off 1=route 2=always-slot6 3=dual
-        const char* e = getenv("PHASE_MOE");
+        const char* e = getenv("PHASE_MOE");  // 5=route-but-use-slot0 (router-cost isolation)
         return e ? atoi(e) : 1;
     }();
-    int slot = dbgMode == 2  ? EX_DVORETSKY
+    int slot = dbgMode == 2  ? EX_DV_CORE
              : dbgMode == 0  ? 0
              : phase_moe_route(pos);
+    if (dbgMode == 5)
+        slot = 0;
+    if (dbgMode == 6)
+    {  // cache-threshold probe: eval cycles through first N distinct nets
+        static const int N = [] {
+            const char* e = getenv("PHASE_MOE_LIMIT");
+            return e ? atoi(e) : 4;
+        }();
+        slot = phase_moe_route(pos) % N;
+    }
     const int routedSlot = slot;
     if (!(*netsLoaded)[slot])  // unfilled slot falls back to the first loaded net
         slot = moeFallback;
@@ -1978,24 +1988,6 @@ Value Search::Worker::evaluate(const Position& pos) {
                     slot, pos.count<ALL_PIECES>(), int(v1), int(v2));
         }
     }
-
-    // STACKED EVALUATION: when an EvalHead is loaded, run each expert's
-    // FULL evaluation (not just the transformer) and combine the scalars
-    if (evalHead != nullptr && evalHead->loaded)
-    {
-        Value expertVals[PhaseMoESlots] = { VALUE_ZERO };
-        for (int s = 0; s < PhaseMoESlots; s++)
-        {
-            if (!(*netsLoaded)[s])
-                continue;
-            expertVals[s] = (*networks[s])[numaAccessToken].evaluate(
-                pos, accumulatorStacks[s], refreshTables[s]);
-        }
-        return apply_eval_head(*evalHead, expertVals, pos,
-                              0 /*domain: TODO compute from position*/,
-                              slot);
-    }
-
     return Eval::evaluate((*networks[slot])[numaAccessToken],
                           pos,
                           accumulatorStacks[slot],

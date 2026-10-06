@@ -32,7 +32,7 @@ sys.path.insert(0, _LAB)
 import scipy.sparse as sp
 import flyfeat_cb
 
-DEV = "cuda"
+DEV = os.environ.get("FCDEV", "cuda")   # FCDEV=cpu: CPU-only merge tests
 STATE = os.environ.get("STATE", _LAB + "/fly_cb.pt")
 LOGF = _LAB + "/fly_cb_log.jsonl"
 BRAIN = _LAB + "/brain_graph.npz"
@@ -2372,7 +2372,7 @@ def gate_tb(model, rows, rng, exhaustive=False):
     by_pool = {}
     for e in rows:
         by_pool.setdefault(e.get("pool", "?"), []).append(e)
-    CH = 2048
+    CH = int(os.environ.get("GATE_CH", "2048"))
     with torch.no_grad():
         for pn, prows in by_pool.items():
             fst = fam.setdefault(pn, [0, 0])

@@ -37,6 +37,7 @@
 #include "nnue/nnue_misc.h"
 #include "numa.h"
 #include "phase_moe.h"
+#include "eval_head.h"
 #include "position.h"
 #include "search.h"
 #include "syzygy/tbprobe.h"  // for Stockfish::Depth

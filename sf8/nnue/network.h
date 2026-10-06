@@ -76,6 +76,9 @@ class Network {
                                  AccumulatorCaches& cache) const;
 
     void load_external(const std::filesystem::path&, const std::filesystem::path&, EvalFile&);
+
+    // stacked head support: expose the feature transformer for multi-expert eval
+    const FeatureTransformer& getFeatureTransformer() const { return featureTransformer; }
     void load_internal(EvalFile&);
 
    private:

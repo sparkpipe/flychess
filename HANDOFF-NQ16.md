@@ -33,19 +33,30 @@ mg_unsafe e489 0.342, mg_safe e~1 0.334 (restarted, low), piece_down e65 0.275, 
 dv_R e126 0.280, mvr e2 0.264, dv_Q e0 0.250 (early), nvb e90 0.254, dv_rest e582 0.262,
 qvmat e418 0.177, rv2m e334 0.236, tb e51 0.218 (all still training; re-pick later for n16.1).
 
-## Live training (continues)
-- 15 sparks + box (op_even_l1). Run dirs: `~/run16_<expert>/` on each spark,
-  `/srv/workspace/chess-active/run16_op_even_l1/` on box. skip=3, no time limit.
-- Spark→expert map: spark0=tb 1=mvr 2=rv2m 3=qvmat 4=nvb 5=piece_down 6=oppb 7=dv_Q 8=dv_R
-  9=dv_rest a=op_pawnimb b=op_even_l0 d=op_even_l2p e=mg_unsafe f=mg_safe, box=op_even_l1, sparkc=none.
-- Watchers: `/tmp/watch_<e>.sh` per spark (per-epoch .nnue export+delete 1.9GB ckpt, hourly
-  wallclock ckpt keep-3). Some restarted runs (tb,mvr,dv_Q,oppb,mg_safe,qvmat? watch state) may
-  lack watchers — CHECK `pgrep -f watch_` per spark if ckpts pile up (disk-full killed 11 runs already).
-- Keepalive cron on box every 30min: `/tmp/fleet_keepalive.sh` (prunes nets, backs up newest ckpt
-  + nets to `/mnt/cold-raid6/chess-audit/train16_backup/<expert>/`).
-- Trainer val metrics now report val_corr, val_mae, val_median in TRUE cp (fixed in
-  `/srv/workspace/flychess/src/nnue-pytorch/model/nnue.py` — box copy only; spark copies have OLD
-  double-scale val_mae, corr unaffected).
+## MAIN nQ16 training: STOPPED 2026-10-06 (operator order)
+- Verdict at stop: NO expert still learning — all 16 peaked epochs ago, tails flat/declining.
+  Final bests: op_even_l1 0.573, op_even_l0 0.576(e44 NEW), op_even_l2p 0.538, op_pawnimb 0.505,
+  mg_unsafe 0.342, mg_safe 0.336(e12 NEW), piece_down 0.275, oppb 0.284, dv_R 0.280, mvr 0.263,
+  nvb 0.254, dv_Q 0.250, dv_rest 0.262, qvmat 0.177, rv2m 0.236, tb 0.220(e65 NEW, serialized from ckpt).
+- engine16/ re-picked with the 3 improvements (op_even_l0 e44, mg_safe e12, tb e65) = n16.1 candidate set.
+- Main nets+ckpts backed up on cold RAID `/mnt/cold-raid6/chess-audit/train16_backup/`; stale
+  epoch ckpt piles deleted (spark0/1/7). Old scripts kept in repo `chess-lab/tools/nq16/anti16/`.
+
+## ANTI16 training: RUNNING since 2026-10-06 ~20:30
+- Same spark→expert map, run dirs `~/runanti_<expert>/` on sparks,
+  `/srv/workspace/chess-active/runanti_op_even_l1/` on box. Bins: `~/anti_<e>.{train,val}.bin`
+  on sparks (renamed from anti16/<e>.*.bin on box). skip=3, no time limit, batch 4096,
+  epoch-size = full bin, val-size = min(30000, val records).
+- Watcher everywhere: `/tmp/anti_watch_spark.sh` (sparks) / `/tmp/train_watch_generic.sh` (box),
+  hourly wallclock ckpt keep-3, per-epoch .nnue export + ckpt delete.
+- Keepalive cron (30min): `/tmp/fleet_keepalive_anti.sh` — prunes nets, backs up to
+  `/mnt/cold-raid6/chess-audit/anti16_backup/`, RESTARTS dead watchers, REPORTS dead trainers
+  (no auto trainer restart). Log: /tmp/fleet_keepalive.log (grep "anti cycle").
+- Fixed nnue.py (true-cp val_corr/val_mae/val_median) pushed to ALL sparks
+  (`~/nnue-pytorch/model/nnue.py`, original kept as nnue.py.bak_main16).
+- Early signal: anti tb val_corr 0.33 by e31 (main tb best was 0.220) — anti bins are cleaner.
+- Ops scripts committed: `chess-lab/tools/nq16/anti16/` (kill16main, cur16, pick16,
+  anti_watch_spark, launch_anti, distribute_anti16, fleet_keepalive_anti).
 
 ## d20 fleet (running)
 All 16 sparks × 16 cores sf17_arm depth-20. Done ~3.47M/7.2M at resume; worker `~/d20_spark_worker.py`

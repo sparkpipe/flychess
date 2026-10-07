@@ -38,9 +38,14 @@ def fh(e, tag):
         counts[k] = 0
     return handles[k]
 
-def emit(board, cp, move, key):
+def emit(board, cp, move, key, pov="stm"):
+    """Pack one training record. Bin scores are ALWAYS stm-pov (trainer contract,
+    see DATA-CONVENTIONS.md). Sources measured white-pov (miniature labels, degm
+    book) must pass pov="white" and are negated for black-to-move positions."""
     if not move or move not in board.legal_moves:
         return False
+    if pov == "white" and board.turn == chess.BLACK:
+        cp = -cp
     e = routeB(board.fen())
     tag = "val" if (hash(key) % 20 == 0) else "train"
     fh(e, tag).write(struct.pack("<32shHHbB", pack_sfen(board),
@@ -123,7 +128,7 @@ if not done("static"):
             mv = next(iter(board.legal_moves))
         except Exception:
             continue
-        emit(board, int(p[2]) / 100.0, mv, ("degm", n))
+        emit(board, int(p[2]) / 100.0, mv, ("degm", n), pov="white")
         n += 1
     print(f"[static] degm {n:,}", flush=True)
     n = 0
@@ -228,7 +233,7 @@ if not done("miniatures") and os.path.exists(MINILBL):
         except Exception:
             skip += 1
             continue
-        if emit(board, cp, mv, ("mini", gid)):
+        if emit(board, cp, mv, ("mini", gid), pov="white"):
             n += 1
     print(f"[miniatures] packed {n:,} skipped {skip:,}", flush=True)
     mark("miniatures")

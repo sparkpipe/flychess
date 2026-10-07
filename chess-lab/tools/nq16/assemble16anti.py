@@ -40,7 +40,10 @@ def fh(e, tag):
         counts[k] = 0
     return handles[k]
 
-def emit(board, cp, move, key):
+def emit(board, cp, move, key, pov="stm"):
+    # Bin scores are ALWAYS stm-pov (trainer contract, DATA-CONVENTIONS.md).
+    if pov == "white" and board.turn == chess.BLACK:
+        cp = -cp
     if not move or move not in board.legal_moves:
         return False
     e = routeB(board.fen())
@@ -125,7 +128,7 @@ if not done("static"):
             mv = next(iter(board.legal_moves))
         except Exception:
             continue
-        emit(board, int(p[2]) / 100.0, mv, ("degm", n))
+        emit(board, int(p[2]) / 100.0, mv, ("degm", n), pov="white")
         n += 1
     print(f"[static] degm {n:,}", flush=True)
     n = 0
@@ -230,7 +233,7 @@ if not done("miniatures") and os.path.exists(MINILBL):
         except Exception:
             skip += 1
             continue
-        if emit(board, cp, mv, ("mini", gid)):
+        if emit(board, cp, mv, ("mini", gid), pov="white"):
             n += 1
     print(f"[miniatures] packed {n:,} skipped {skip:,}", flush=True)
     mark("miniatures")

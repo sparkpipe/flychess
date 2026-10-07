@@ -31,35 +31,51 @@ class Engine:
     def top5(self, fen, depth):
         self.cmd(f"position fen {fen}\ngo depth {depth}\n")
         lines = {}
+        bare = None  # score from a pv-less info line (checkmate/stalemate end plies)
         while True:
             l = self.p.stdout.readline()
             if not l:
                 return []
-            if l.startswith("info ") and " pv " in l:
-                mp = cp = mate = None
-                pv = ""
+            if l.startswith("info ") and " score " in l:
                 toks = l.split()
+                cp = mate = None
                 for i, t in enumerate(toks):
-                    if t == "multipv":
-                        mp = int(toks[i + 1])
-                    elif t == "cp" and toks[i - 1] == "score":
-                        cp = int(toks[i + 1])
-                    elif t == "mate" and toks[i - 1] == "score":
-                        mate = int(toks[i + 1])
-                    elif t == "pv":
-                        pv = " ".join(toks[i + 1:])
+                    if t in ("cp", "mate") and toks[i - 1] == "score":
+                        if t == "cp":
+                            cp = int(toks[i + 1])
+                        else:
+                            mate = int(toks[i + 1])
                         break
-                if mp is not None:
+                if " pv " in l:
+                    mp = pv = None
+                    for i, t in enumerate(toks):
+                        if t == "multipv":
+                            mp = int(toks[i + 1])
+                        elif t == "pv":
+                            pv = " ".join(toks[i + 1:])
+                            break
+                    if mp is not None:
+                        if mate is not None:
+                            # mate encoding: 10000 + mate-in (cap 900); see DATA-CONVENTIONS
+                            v = (10000 + min(abs(mate), 900)) * (1 if mate > 0 else -1)
+                        else:
+                            v = cp
+                        lines[mp] = (v, pv)
+                elif cp is not None or mate is not None:
                     if mate is not None:
-                        # mate encoding: 10000 + mate-in (cap 900); see DATA-CONVENTIONS
-                        v = (10000 + min(abs(mate), 900)) * (1 if mate > 0 else -1)
+                        # mate 0 = side to move is mated (stm-pov -(10000+N))
+                        bare = (10000 + min(abs(mate), 900)) * (1 if mate > 0 else -1)
                     else:
-                        v = cp
-                    lines[mp] = (v, pv)
+                        bare = cp
             elif l.startswith("bestmove"):
                 break
         stm = 1 if fen.split()[1] == "w" else -1
-        return [(v * stm, pv) for _, (v, pv) in sorted(lines.items())][:5]
+        if lines:
+            return [(v * stm, pv) for _, (v, pv) in sorted(lines.items())][:5]
+        if bare is not None:
+            # end ply (checkmate/stalemate): no pv lines exist at all
+            return [(bare * stm, "#")]
+        return []
 
 
 def load_save(update):

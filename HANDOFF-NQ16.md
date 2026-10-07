@@ -205,3 +205,22 @@ SF17 x86 at /srv/workspace/flychess/src/sf17/src/stockfish (for UI evals).
   RAID, pack_expert_bins.py + nnue-pytorch + nq13-engine in repo.
 - evalsigntest.py = fast engine-level regression gate (known-sign positions) — run it
   after ANY net swap before matchmaking.
+
+## 2026-10-07 LATER: PILOT VERDICT + SF17 RELABEL + UI FIXES
+- UI: game-switch now scrolls movelist to top (first moves visible) + resets chart zoom +
+  per-render try/catch. Verified in real browser. (index.html committed.)
+- SF17 relabel of all 43.5M miniature labels RUNNING on box (relabel17b.py, 16 workers,
+  stm-pov output, self-validating; ETA ~20h; out: miniature_labels17.tsv). First attempt
+  (relabel17.py) had a worker-arg unpack bug and wrote garbage — caught by row-shape check,
+  deleted, rewritten. mini_label.py used SF8 because it pointed at /usr/games/stockfish —
+  the SF17 ruling was applied to farm labelers but missed this box-side script.
+- PILOT (operator: verify before full training): 60k piece_down positions, SF17 d12 stm-pov,
+  fixed emit, 35-min train on box. Verdict (pilot_verdict.py, net in piece_down slot):
+  queen-up +809/-759 (broken v1: +246/-142; truth ~±900), rook-down -341/+466.
+  PIPELINE FIXED — corrected data produces sane material evals from a tiny budget.
+- train16v2 assembly COMPLETE (perspective-fixed, mini labels still SF8).
+  v3 (SF17 labels everywhere) after relabel17 finishes: assemble with MINILBL=
+  miniature_labels17.tsv, minis pov default stm. RETRAIN from v3 (or v2 interim) once
+  GPU capacity ruled. audit gates now: source_audit (pre-pack law), audit_bin_labels
+  (post-pack), evalsigntest/pilot_verdict (engine-level) — the routing-only audit of
+  10-06 could not catch label perspective; these three each would have.

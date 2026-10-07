@@ -16,12 +16,33 @@ OUT = "/srv/workspace/chess-active/matches/games.json"
 TAG = "nQ 1s vs n16 1.14s (nps-calibrated)"
 EVAL_FIELDS = ("evals_d12", "evals_d20", "evals_d25",
                "pv_d12", "pv_d20", "pv_d25")
-# 3open.epd book positions -> sidebar labels (keyed on board+stm fields)
+# 3open.epd book positions -> (sidebar label, book moves from startpos)
 BOOK = {
-    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w": "startpos",
-    "rnbqkbnr/ppp1pppp/8/3p4/3PP3/8/PPP2PPP/RNBQKBNR b": "BDG (1.d4 d5 2.e4)",
-    "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b": "French Advance (3.e5)",
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w": ("startpos", []),
+    "rnbqkbnr/ppp1pppp/8/3p4/3PP3/8/PPP2PPP/RNBQKBNR b":
+        ("BDG (1.d4 d5 2.e4)", ["d2d4", "d7d5", "e2e4"]),
+    "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b":
+        ("French Advance (3.e5)", ["e2e4", "e7e6", "d2d4", "d7d5", "e4e5"]),
 }
+
+
+def book_san_for(fen0):
+    """SAN of the book prefix, or [] if it can't be replayed to the exact position."""
+    start = " ".join(fen0.split()[:2])
+    label, ucis = BOOK.get(start, ("book position", []))
+    if not ucis:
+        return label, []
+    b = chess.Board()
+    sans = []
+    try:
+        for u in ucis:
+            sans.append(b.san(chess.Move.from_uci(u)))
+            b.push(chess.Move.from_uci(u))
+    except Exception:
+        return label, []
+    if b.fen().split()[0] != fen0.split()[0]:
+        return label, []  # replay doesn't reach the game start: suppress prefix
+    return label, sans
 
 
 def parse_pgn():
@@ -39,13 +60,13 @@ def parse_pgn():
                 board.push(mv)
                 fens.append(board.fen())
             h = g.headers
-            start = " ".join(fens[0].split()[:2])
+            label, book_san = book_san_for(fens[0])
             games.append({
                 "white": h.get("White", "?"), "black": h.get("Black", "?"),
                 "result": h.get("Result", "*"), "ply": len(sans),
                 "termination": h.get("Termination", "normal"),
                 "open": h.get("Result", "*") == "*",
-                "opening": BOOK.get(start, "book position" if fens[0].split()[0] != "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" else "startpos"),
+                "opening": label, "book_san": book_san,
                 "white_elo": "", "black_elo": "",
                 "date": h.get("Date", ""), "time": h.get("GameEndTime", ""),
                 "sans": sans, "ucis": ucis, "fens": fens,

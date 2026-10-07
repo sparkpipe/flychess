@@ -11,6 +11,8 @@
   #side h1 { font-size:15px; margin:4px 0 10px; color:var(--gold); }
   .match { margin-bottom:14px; }
   .match .tag { color:var(--acc); font-weight:600; font-size:12px; letter-spacing:.4px; margin-bottom:4px; }
+  .mrow.bk .mno { color:#4a515e; }
+  .bkmv { color:#5f6774 !important; font-style:italic; }
   .gbtn { display:block; width:100%; text-align:left; background:none; color:var(--fg); border:1px solid transparent; border-radius:6px; padding:5px 8px; cursor:pointer; font:inherit; }
   .gbtn > span:first-child { display:flex; justify-content:space-between; gap:6px; }
   .score { font-size:12px; color:var(--gold); padding:2px 8px 6px; font-variant-numeric:tabular-nums; }
@@ -240,7 +242,25 @@ function renderMoves(){
   try { blackFirst = g.fens[0].split(" ")[1] === "b"; } catch(e) {}
   const cells = [];  // flat [{san, i}]
   for (let i=0;i<g.sans.length;i++) cells.push(i);
-  let idx = 0, moveno = 1, skipWhite = blackFirst;
+  // book prefix (opening moves before the game start) — dimmed, true numbering
+  const book = g.book_san || [];
+  let bn = 1, bi = 0;
+  while (bi < book.length){
+    const row = document.createElement("div"); row.className="mrow bk";
+    const no = document.createElement("span"); no.className="mno"; no.textContent=(bn)+"."; row.appendChild(no);
+    const w = document.createElement("span"); w.className="mv bkmv"; w.textContent = book[bi++] || "";
+    row.appendChild(w); row.appendChild(document.createElement("span"));
+    if (bi < book.length){
+      const b2 = document.createElement("span"); b2.className="mv bkmv"; b2.textContent = book[bi++] || "";
+      row.appendChild(b2); row.appendChild(document.createElement("span"));
+    } else {
+      row.appendChild(document.createElement("span"));
+      row.appendChild(document.createElement("span"));
+    }
+    bn++;
+    mv.appendChild(row);
+  }
+  let idx = 0, moveno = Math.floor(book.length / 2) + 1, skipWhite = blackFirst;
   while (idx < cells.length){
     const row = document.createElement("div"); row.className="mrow";
     const no = document.createElement("span"); no.className="mno"; no.textContent=(moveno)+"."; row.appendChild(no);

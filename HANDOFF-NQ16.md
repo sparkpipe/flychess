@@ -168,3 +168,18 @@ SF17 x86 at /srv/workspace/flychess/src/sf17/src/stockfish (for UI evals).
 5. Re-pick best nets (runs still improving) → n16.1 when operator says.
 6. Morning list: sparkc fine (no reboot needed), NVMe replacement, tb/qvmat label autopsies,
    provenance+audit re-run on rebuilt bins, live-page feeds onto chess-active.
+
+## 2026-10-07 LATER: FULL TEARDOWN (operator order: disk cleanup + no zombies + all code in repo)
+- Nets fully backed to cold RAID first (train16_backup + anti16_backup, ALL spark nets dirs;
+  tb/mvr/dv_Q have only 1 main net each — their watchers died mid-run, picks live in engine16/).
+- Sparks cleaned: ckpts, nets, bin copies, d20 files, ALL /tmp launch+watch scripts deleted.
+  Freed 11-20 GB/spark (~260 GB fleet). Kept: metrics.csv + train.log per run dir (autopsy value).
+- sparkc had a live main-era watcher loop (train_watch_spark.sh) — killed + script removed.
+- Box cleaned: run16/runanti op_even_l1 ckpts+nets, /tmp junk nets, ALL trainer-launch scripts
+  (archived to repo first). /srv/workspace at 260G free. Box crontab EMPTY. All spark crontabs EMPTY.
+- Zombie census CLEAN fleet-wide (train.py/train23_queue/watchers/launchers/queues/keepers: zero).
+- ALL code in repo: chess-lab/tools/nq16/box-tmp/ = 170 scripts archived from box /tmp
+  (engine port/patch series, diagnostics, assemblers, launchers); ui/pieces/ glyph assets added;
+  match16/ has audit/clean/census/backup scripts. Branch nq16-era pushed.
+- NOT deleted (not mine): spark3 ~/extnvme/salvage = 832 GB (from-spark6, phase-moe rescue copy).
+  Surfaced to operator — their call.

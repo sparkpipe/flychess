@@ -42,7 +42,36 @@ qvmat e418 0.177, rv2m e334 0.236, tb e51 0.218 (all still training; re-pick lat
 - Main nets+ckpts backed up on cold RAID `/mnt/cold-raid6/chess-audit/train16_backup/`; stale
   epoch ckpt piles deleted (spark0/1/7). Old scripts kept in repo `chess-lab/tools/nq16/anti16/`.
 
-## ANTI16 training: RUNNING since 2026-10-06 ~20:30
+## 2026-10-07: ANTI STOPPED + SPARKS FREED + nQ-vs-n16 MATCH DONE
+- Anti verdict: done — every spark expert peaked long ago (bests at e50-e2444 of much longer
+  runs). Box op_even_l1 stopped too (best e87 corr 0.8384). 16 best anti nets at
+  `/srv/workspace/chess-active/engine16anti/` (tb .456, mvr .579, rv2m .588, qvmat .490,
+  nvb .684, piece_down .456, oppb .688, dv_Q .664, dv_R .687, dv_rest .675, op_pawnimb .799,
+  op_even_l0 .836, op_even_l1 .838, op_even_l2p .869, mg_unsafe .693, mg_safe .711).
+- ALL sparks freed for the other dev (kill script `chess-lab/tools/nq16/match16/free_sparks.sh`);
+  census-verified only sparkpipe_weightd remains (their serving, do not touch).
+- d20 fleet FINISHED (253430/253430 everywhere); outputs collected to
+  `/mnt/cold-raid6/chess-audit/depth_db/shards/d20_spark*.tsv` (3.8M lines) — d12→d20 delta
+  mining now unblocked. Merge collector still TODO.
+- Box disk hit 100% (runanti ckpts 164G + run16 leftovers 98G — box anti watcher died at
+  startup because checkpoints/ didn't exist 2s after launch). Cleaned to 258G free.
+  Also found+killed 23-era zombie trainer (pd_down off cold RAID!) + 2 train23_queue workers.
+  Crontab now EMPTY. LESSON: watcher must wait for checkpoints dir, not exit.
+- NPS (fixed-node 500k, 6-position mix, 1 thread): nQ13 ~473k, n16 ~416k → ratio 1.137
+  (16-slot switching cost ~14%, vs nQ.23's 2×). n16 = engine16 nets (with op_even_l0 e44,
+  mg_safe e12, tb e65 re-picks).
+- MATCH (6 games, 3open.epd, color-reversed, nQ st=1 vs n16 st=1.14 node-calibrated):
+  **nQ 6-0 n16** — all decisive, nQ won both colors on all 3 openings. Engine mechanically
+  perfect (60-90 ply games, exact time compliance, no forfeits — the piped-movetime quirk is
+  confirmed a pipe artifact). Gap is NET quality, not engine code. PGN+log:
+  `/srv/workspace/chess-active/matches/nq_vs_n16_1s.{pgn,log}`.
+- nQ13 wiring (tourney6-proven): EvalFile=balanced_l0 EvalFile5=nvb (slot nvsb!) EvalFile13=tactics (slot tb!).
+- Live page feed REBUILT: box `/srv/workspace/chess-active/matches/` runs `match_feed.py`
+  (PGN→games.json) + 3× `match_eval_worker.py i 3` (SF17 multipv-5 d12/20/25, flock'd).
+  Mac serve.py repointed (was dead /extnvme path), title refreshed. Page verified in real
+  browser: 6 games, board, movelist, evals filling.
+
+## ANTI16 training (STOPPED 2026-10-07 — see above)
 - Same spark→expert map, run dirs `~/runanti_<expert>/` on sparks,
   `/srv/workspace/chess-active/runanti_op_even_l1/` on box. Bins: `~/anti_<e>.{train,val}.bin`
   on sparks (renamed from anti16/<e>.*.bin on box). skip=3, no time limit, batch 4096,

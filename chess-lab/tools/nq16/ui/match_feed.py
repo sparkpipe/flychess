@@ -16,6 +16,12 @@ OUT = "/srv/workspace/chess-active/matches/games.json"
 TAG = "nQ 1s vs n16 1.14s (nps-calibrated)"
 EVAL_FIELDS = ("evals_d12", "evals_d20", "evals_d25",
                "pv_d12", "pv_d20", "pv_d25")
+# 3open.epd book positions -> sidebar labels (keyed on board+stm fields)
+BOOK = {
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w": "startpos",
+    "rnbqkbnr/ppp1pppp/8/3p4/3PP3/8/PPP2PPP/RNBQKBNR b": "BDG (1.d4 d5 2.e4)",
+    "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b": "French Advance (3.e5)",
+}
 
 
 def parse_pgn():
@@ -33,11 +39,13 @@ def parse_pgn():
                 board.push(mv)
                 fens.append(board.fen())
             h = g.headers
+            start = " ".join(fens[0].split()[:2])
             games.append({
                 "white": h.get("White", "?"), "black": h.get("Black", "?"),
                 "result": h.get("Result", "*"), "ply": len(sans),
                 "termination": h.get("Termination", "normal"),
                 "open": h.get("Result", "*") == "*",
+                "opening": BOOK.get(start, "book position" if fens[0].split()[0] != "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" else "startpos"),
                 "white_elo": "", "black_elo": "",
                 "date": h.get("Date", ""), "time": h.get("GameEndTime", ""),
                 "sans": sans, "ucis": ucis, "fens": fens,

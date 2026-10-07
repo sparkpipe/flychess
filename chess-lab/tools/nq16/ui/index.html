@@ -11,7 +11,10 @@
   #side h1 { font-size:15px; margin:4px 0 10px; color:var(--gold); }
   .match { margin-bottom:14px; }
   .match .tag { color:var(--acc); font-weight:600; font-size:12px; letter-spacing:.4px; margin-bottom:4px; }
-  .gbtn { display:flex; justify-content:space-between; gap:6px; width:100%; text-align:left; background:none; color:var(--fg); border:1px solid transparent; border-radius:6px; padding:5px 8px; cursor:pointer; font:inherit; }
+  .gbtn { display:block; width:100%; text-align:left; background:none; color:var(--fg); border:1px solid transparent; border-radius:6px; padding:5px 8px; cursor:pointer; font:inherit; }
+  .gbtn > span:first-child { display:flex; justify-content:space-between; gap:6px; }
+  .score { font-size:12px; color:var(--gold); padding:2px 8px 6px; font-variant-numeric:tabular-nums; }
+  .openlab { font-size:11px; color:#8b93a1; padding-top:2px; }
   .gbtn:hover { border-color:var(--line); }
   .gbtn.sel { background:#262b33; border-color:var(--acc); }
   .live-dot { width:8px; height:8px; border-radius:50%; background:#e0565a; display:inline-block; margin-right:5px; animation:pulse 1.6s infinite; }
@@ -105,11 +108,18 @@ function findSel(){
   for (const m of DATA) m.games.forEach((g,gi)=>{ if (keyOf(m,gi)===selKey) sel = {m,g,gi}; });
 }
 function pickDefault(){
+  // live game first; otherwise FIRST game of first match (stable default, no yanking)
   for (const m of DATA) for (let i=m.games.length-1;i>=0;i--)
     if (m.games[i].open){ return keyOf(m,i); }
-  for (let i=DATA.length-1;i>=0;i--)
-    if (DATA[i].games.length) return keyOf(DATA[i], DATA[i].games.length-1);
+  for (const m of DATA) if (m.games.length) return keyOf(m,0);
   return null;
+}
+function saveSel(){ try { localStorage.setItem("flychess.selKey", selKey||""); localStorage.setItem("flychess.ply", String(ply)); } catch(e){} }
+function restoreSel(){
+  let k = null; try { k = localStorage.getItem("flychess.selKey"); } catch(e){}
+  if (k){ selKey = k; findSel(); if (sel){ const p = parseInt(localStorage.getItem("flychess.ply")||"0",10); ply = Math.max(0, Math.min(p, sel.g.fens.length-1)); return; } }
+  selKey = null;
+  const d = pickDefault(); if (d){ selKey = d; findSel(); ply = sel && sel.g.open ? sel.g.fens.length-1 : 0; }
 }
 
 function renderSide(){
@@ -117,6 +127,21 @@ function renderSide(){
   for (const m of DATA){
     const md = document.createElement("div"); md.className="match";
     const t = document.createElement("div"); t.className="tag"; t.textContent = m.tag; md.appendChild(t);
+    // match score summary: wins per engine across all games
+    const wins = {};
+    let draws = 0;
+    for (const g of m.games){
+      if (g.result==="1-0") wins[g.white]=(wins[g.white]||0)+1;
+      else if (g.result==="0-1") wins[g.black]=(wins[g.black]||0)+1;
+      else if (g.result==="1/2-1/2") draws++;
+    }
+    const names = [...new Set(m.games.flatMap(g=>[g.white,g.black]))];
+    if (names.length){
+      const sc = document.createElement("div"); sc.className="score";
+      sc.textContent = names.map(n=>`${n} ${wins[n]||0}`).join("  ·  ") + (draws? `  ·  draws ${draws}` : "");
+      md.appendChild(sc);
+    }
+    let prevOpen = null;
     m.games.forEach((g,gi)=>{
       const b = document.createElement("button"); b.className="gbtn";
       const nm = document.createElement("span");
@@ -125,8 +150,16 @@ function renderSide(){
       const r = document.createElement("span"); r.className="res";
       r.textContent = g.open ? g.ply+" plies" : g.result;
       b.appendChild(nm); b.appendChild(r);
+      // opening book label + pairing marker (same start position as previous game = colors reversed)
+      const openLabel = g.opening || "";
+      if (openLabel){
+        const ol = document.createElement("div"); ol.className="openlab";
+        ol.textContent = openLabel + (prevOpen===openLabel ? " · colors reversed" : "");
+        b.appendChild(ol);
+        prevOpen = openLabel;
+      } else prevOpen = null;
       if (keyOf(m,gi)===selKey) b.classList.add("sel");
-      b.onclick = ()=>{ selKey = keyOf(m,gi); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; renderAll(); };
+      b.onclick = ()=>{ selKey = keyOf(m,gi); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; saveSel(); renderAll(); };
       md.appendChild(b);
     });
     root.appendChild(md);
@@ -446,8 +479,9 @@ async function poll(){
     poll.lastFp = fp;
     DATA = j;
     if (!selKey || wasEmpty){
-      const k = pickDefault();
-      if (k){ selKey = k; findSel(); ply = sel && sel.g.open ? sel.g.fens.length-1 : 0; }
+      restoreSel();
+      if (!sel){ const k = pickDefault(); if (k){ selKey = k; findSel(); ply = sel && sel.g.open ? sel.g.fens.length-1 : 0; } }
+      saveSel();
     } else {
       findSel();
       if (sel && sel.g.open && $("followcb").checked && !userNav){

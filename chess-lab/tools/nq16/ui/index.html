@@ -159,7 +159,7 @@ function renderSide(){
         prevOpen = openLabel;
       } else prevOpen = null;
       if (keyOf(m,gi)===selKey) b.classList.add("sel");
-      b.onclick = ()=>{ selKey = keyOf(m,gi); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; saveSel(); renderAll(); };
+      b.onclick = ()=>{ selKey = keyOf(m,gi); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll(); };
       md.appendChild(b);
     });
     root.appendChild(md);
@@ -284,6 +284,7 @@ function renderMoves(){
   }
   const cur = mv.querySelector(".mv.cur");
   if (cur) cur.scrollIntoView({block:"nearest"});
+  else mv.scrollTop = 0;  // ply 0 or nothing selected: show first moves
 }
 
 let chartWin = null;  // [a,b] ply window or null = full
@@ -428,7 +429,11 @@ function renderPv(){
   el.appendChild(b0);
 }
 
-function renderAll(){ renderSide(); renderHdr(); renderBoard(); renderMoves(); renderChart(); renderPv(); }
+function renderAll(){
+  for (const f of [renderSide, renderHdr, renderBoard, renderMoves, renderChart, renderPv]){
+    try { f(); } catch(e){ console.error(f.name, e); }
+  }
+}
 
 // chart: click = jump, drag = zoom to range, double-click = reset
 let dragStart = null;

@@ -22,6 +22,11 @@ absence cost the entire nQ16 generation (below).
 | DEGM book | `wp_fit/trainsets/sources/degm.tsv` (cp×100) | ~6k | white (24/40, coarse) | `pov="white"` |
 | syzygy WDL | `wp_fit/trainsets/sources/tb.tsv` | ~100k | winner-sign (not an eval) | wp-inversion cp, per design |
 
+Mate scores in ANY eval/label file: **10000 + mate-in, capped at 900** (e.g. mate in 4
+= 10004; the mated side negative). Display layers decode |v|>9000 as mate. (A 1000+N
+encoding collided with genuine 1000-2000cp evals and rendered checkmate as "+10.0" —
+fixed 2026-10-07 in match_eval_worker + relabel17b + UI fmtEval/renderPv.)
+
 Label engines: segments/puzzles = original eval-worker (stm). Miniatures = **SF8**
 (`/usr/games/stockfish`, mini_label.py line 4) flipped to white-pov at line 41-42.
 

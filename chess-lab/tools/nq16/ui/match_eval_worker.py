@@ -51,7 +51,8 @@ class Engine:
                         break
                 if mp is not None:
                     if mate is not None:
-                        v = (1000 + abs(mate)) * (1 if mate > 0 else -1)
+                        # mate encoding: 10000 + mate-in (cap 900); see DATA-CONVENTIONS
+                        v = (10000 + min(abs(mate), 900)) * (1 if mate > 0 else -1)
                     else:
                         v = cp
                     lines[mp] = (v, pv)

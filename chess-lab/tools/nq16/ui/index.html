@@ -229,7 +229,7 @@ function bestEval(g, i){  // highest-depth eval at ply i, or null
 }
 function fmtEval(v){
   if (v == null) return "";
-  if (Math.abs(v) > 9000) return (v>0?"M":"M-") + (Math.abs(v)-1000);
+  if (Math.abs(v) > 9000) return (v>0?"M":"-M") + (Math.abs(v)-10000);
   const u = v/100;
   return (u>=0?"+":"") + u.toFixed(1);
 }
@@ -322,7 +322,7 @@ function renderChart(){
   for (const gv of [-1000,-500,0,500,1000]){
     mk("line",{x1:L,y1:y(gv),x2:W-Rp,y2:y(gv),stroke:gv===0?"#3a4150":"#262b33","stroke-width":gv===0?1.4:1});
     const t = mk("text",{x:L-4,y:y(gv)+3,"text-anchor":"end","font-size":9,fill:"#8a919c"});
-    t.textContent = gv===0?"0":(gv>0?"+":"")+gv/10;
+    t.textContent = gv===0?"0":(gv>0?"+":"")+(gv/100);
   }
   if (!sel){ const t=mk("text",{x:W/2,y:H/2,"text-anchor":"middle","font-size":11,fill:"#8a919c"}); t.textContent="no evals yet"; return; }
   const g = sel.g;
@@ -402,7 +402,7 @@ function renderPv(){
         const [cp, moves] = line.split("|");
         const v = parseInt(cp, 10);
         const sc = Math.abs(v) > 9000
-          ? (v>0?"#"+(Math.abs(v)-1000):"-#"+(Math.abs(v)-1000))
+          ? (v>0?"M"+(Math.abs(v)-10000):"-M"+(Math.abs(v)-10000))
           : ((v/100)>=0?"+":"")+(v/100).toFixed(2);
         const row = document.createElement("div");
         const s1 = document.createElement("span");

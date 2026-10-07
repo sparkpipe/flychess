@@ -183,3 +183,25 @@ SF17 x86 at /srv/workspace/flychess/src/sf17/src/stockfish (for UI evals).
   match16/ has audit/clean/census/backup scripts. Branch nq16-era pushed.
 - NOT deleted (not mine): spark3 ~/extnvme/salvage = 832 GB (from-spark6, phase-moe rescue copy).
   Surfaced to operator — their call.
+
+## 2026-10-07 NIGHT: ROOT CAUSE FOUND — nQ16 label-perspective inversion
+- n16 "plays backwards" diagnosis chain (all evidence in DATA-CONVENTIONS.md):
+  engine wiring CORRECT (source-verified EvalFile->slot map); eval signs CORRECT but
+  magnitudes 4-7x compressed (queen-up = +246 vs nQ13 +1069, worst on black-to-move).
+  Bin-sample audit: labels at 0.34x scale, sign chaos. Source audit: segments STM
+  (31/36), puzzles STM (65/74), MINIATURES WHITE-POV (39/40, SF8-labeled, 43.5M rows),
+  degm white-pov. assemble16r packed all verbatim into STM-pov bins => every
+  black-to-move miniature row inverted. Val corr was self-consistently positive (trap).
+- FIX: pov-aware emit in assemble16r.py + assemble16anti.py (white sources negated for
+  black-stm at pack; NO relabeling needed). Committed + pushed.
+- BINS REBUILDING: box /srv/workspace/chess-active/train16v2/ (assemble.log), fixed
+  assembler from repo, launched ~01:5x. Re-run match16/audit_bin_labels.py on v2 bins
+  BEFORE training (expect stm-sign ~100%, scale ~1.0).
+- RETRAINING not launched (GPU capacity ruling pending): A) box-only sequential,
+  6 miniature-flooded experts first (op_even_l0/l1/l2p, op_pawnimb, mg_safe/unsafe)
+  ~2-3 days; B) wait for sparks => 16-parallel ~1 day. Anti16 nets equally invalid
+  (same bug) — re-assemble anti after main rebuild.
+- nQ recreation: YES, recipe-complete (DATA-CONVENTIONS.md) — all sources on cold
+  RAID, pack_expert_bins.py + nnue-pytorch + nq13-engine in repo.
+- evalsigntest.py = fast engine-level regression gate (known-sign positions) — run it
+  after ANY net swap before matchmaking.

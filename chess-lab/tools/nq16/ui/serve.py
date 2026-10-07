@@ -5,7 +5,7 @@ import http.server, socketserver, os, threading, subprocess, time
 HOME = os.path.expanduser("~/games-live")
 PORT = 8077
 BOX = "spec@192.168.50.4"
-REMOTE = "/extnvme/active/matches/games.json"
+REMOTE = "/srv/workspace/chess-active/matches/games.json"
 
 def poll_forever():
     while True:
@@ -14,11 +14,6 @@ def poll_forever():
                 ["rsync", "-q", "-e", "ssh -o ConnectTimeout=10 -o BatchMode=yes",
                  f"{BOX}:{REMOTE}", f"{HOME}/games.json"],
                 timeout=30)
-            if os.path.exists(f"{HOME}/focus.json"):
-                subprocess.run(
-                    ["rsync", "-q", "-e", "ssh -o ConnectTimeout=10 -o BatchMode=yes",
-                     f"{HOME}/focus.json", f"{BOX}:/extnvme/active/matches/focus.json"],
-                    timeout=30)
         except Exception:
             pass
         time.sleep(12)

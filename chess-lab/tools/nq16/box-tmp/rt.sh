@@ -1,0 +1,10 @@
+run() { (printf "position fen %s\ngo depth 8\n" "$1"; sleep 3) | PHASE_MOE=4 timeout 8 ./stockfish 2>&1 | grep -m1 ROUTE; }
+run "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+run "rnbqkbnr/pp3ppp/4p3/2pp4/3PP3/8/PPP2PPP/RNBQKBNR w kq - 0 4"
+run "5k2/5p2/8/8/8/3K1NP1/8/6b1 w - - 0 1"
+run "r7/4kpp1/8/8/8/3K1PP1/4N3/8 w - - 0 1"
+run "6k1/5ppp/8/8/8/3R1PPP/8/1n1n1K2 w - - 0 1"
+run "r4rk1/5ppp/8/8/8/3Q1PPP/8/5K2 w - - 0 1"
+run "5k2/5p2/8/2b5/8/3KB3/5P2/8 w - - 0 1"
+run "8/2p2k2/8/8/8/8/2P1K3/8 w - - 0 1"
+run "8/8/8/4k3/8/8/4PK2/8 w - - 0 1"

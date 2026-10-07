@@ -159,7 +159,7 @@ function renderSide(){
         prevOpen = openLabel;
       } else prevOpen = null;
       if (keyOf(m,gi)===selKey) b.classList.add("sel");
-      b.onclick = ()=>{ selKey = keyOf(m,gi); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll(); };
+      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll(); };
       md.appendChild(b);
     });
     root.appendChild(md);
@@ -211,7 +211,7 @@ function renderBoard(){
 function renderHdr(){
   if (!sel){ $("players").textContent="no games yet"; $("meta").textContent=""; return; }
   const g = sel.g;
-  $("players").textContent = g.white + "  vs  " + g.black;
+  $("players").textContent = `Game ${sel.gi+1} · ${g.white}  vs  ${g.black}` + (g.opening? ` · ${g.opening}` : "");
   const have = DEPTHS.filter(d => Array.isArray(g["evals_d"+d]));
   $("meta").textContent = `${sel.m.tag} · ${g.result==="*"?"playing":g.result} · ply ${ply}/${g.fens.length-1}`
     + (g.termination? " · "+g.termination : "")
@@ -430,6 +430,7 @@ function renderPv(){
 }
 
 function renderAll(){
+  findSel();  // resolve sel from selKey before rendering — click must take effect immediately
   for (const f of [renderSide, renderHdr, renderBoard, renderMoves, renderChart, renderPv]){
     try { f(); } catch(e){ console.error(f.name, e); }
   }

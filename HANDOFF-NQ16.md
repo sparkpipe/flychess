@@ -224,3 +224,4 @@ SF17 x86 at /srv/workspace/flychess/src/sf17/src/stockfish (for UI evals).
   GPU capacity ruled. audit gates now: source_audit (pre-pack law), audit_bin_labels
   (post-pack), evalsigntest/pilot_verdict (engine-level) — the routing-only audit of
   10-06 could not catch label perspective; these three each would have.
+n16quick 1.5-4.5 vs nQ13 (2s vs 1s): W game5 by mate, D game3, 4 losses; plies 98-143, zero forfeits

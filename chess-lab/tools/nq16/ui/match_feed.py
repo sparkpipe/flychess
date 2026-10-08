@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Live feed: parse fastchess match PGN -> games.json for the :8077 UI.
-
-Idempotent merge: preserves eval fields already filled by match_eval_worker.
-Loops every 10s; games appear as fastchess finalizes them in the PGN.
-"""
+"""Live feed v2 — MATCH HISTORY: scans the matches dir for *.pgn (one per match),
+builds games.json as a LIST of matches (oldest first, newest last). Past matches
+and their eval fields are never removed; new matches appear as they finish.
+Eval fields are merged from the previous games.json by (tag, game identity)."""
+import glob
 import json
 import os
 import time
@@ -11,11 +11,12 @@ import time
 import chess
 import chess.pgn
 
-PGN = "/srv/workspace/chess-active/matches/nq_vs_n16_1s.pgn"
-OUT = "/srv/workspace/chess-active/matches/games.json"
-TAG = "nQ 1s vs n16 1.14s (nps-calibrated)"
-EVAL_FIELDS = ("evals_d12", "evals_d20", "evals_d25",
-               "pv_d12", "pv_d20", "pv_d25")
+MDIR = "/srv/workspace/chess-active/matches"
+OUT = f"{MDIR}/games.json"
+TAGS = {
+    "nq_vs_n16_1s.pgn": "nQ 1s vs n16 1.14s (nps-calibrated)",
+    "n16quick_vs_nq_2v1.pgn": "n16 2s vs nQ 1s (10-min nets)",
+}
 # 3open.epd book positions -> (sidebar label, book moves from startpos)
 BOOK = {
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w": ("startpos", []),
@@ -24,10 +25,11 @@ BOOK = {
     "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b":
         ("French Advance (3.e5)", ["e2e4", "e7e6", "d2d4", "d7d5", "e4e5"]),
 }
+EVAL_FIELDS = ("evals_d12", "evals_d20", "evals_d25",
+               "pv_d12", "pv_d20", "pv_d25")
 
 
 def book_san_for(fen0):
-    """SAN of the book prefix, or [] if it can't be replayed to the exact position."""
     start = " ".join(fen0.split()[:2])
     label, ucis = BOOK.get(start, ("book position", []))
     if not ucis:
@@ -41,13 +43,13 @@ def book_san_for(fen0):
     except Exception:
         return label, []
     if b.fen().split()[0] != fen0.split()[0]:
-        return label, []  # replay doesn't reach the game start: suppress prefix
+        return label, []
     return label, sans
 
 
-def parse_pgn():
+def parse_pgn(path):
     games = []
-    with open(PGN) as f:
+    with open(path) as f:
         while True:
             g = chess.pgn.read_game(f)
             if g is None:
@@ -75,33 +77,40 @@ def parse_pgn():
 
 
 def load_old():
+    """eval fields from the previous games.json, keyed (tag, white, black, date, ply)."""
     if not os.path.exists(OUT):
         return {}
     try:
-        doc = json.load(open(OUT))
-        for m in doc:
-            if m["tag"] == TAG:
-                return {(g["white"], g["black"], g["date"], g["ply"]): g
-                        for g in m["games"]}
+        old = json.load(open(OUT))
     except Exception:
-        pass
-    return {}
+        return {}
+    keep = {}
+    for m in old:
+        for g in m.get("games", []):
+            if any(f in g for f in EVAL_FIELDS):
+                keep[(m["tag"], g["white"], g["black"], g["date"], g["ply"])] = \
+                    {f: g[f] for f in EVAL_FIELDS if f in g}
+    return keep
 
 
 def main():
     while True:
         try:
-            if os.path.exists(PGN):
-                games = parse_pgn()
-                if games:
-                    old = load_old()
+            pgns = sorted(glob.glob(f"{MDIR}/*.pgn"), key=os.path.getmtime)
+            if pgns:
+                old = load_old()
+                doc = []
+                for p in pgns:
+                    tag = TAGS.get(os.path.basename(p), os.path.basename(p)[:-4])
+                    games = parse_pgn(p)
+                    if not games:
+                        continue
                     for g in games:
-                        k = (g["white"], g["black"], g["date"], g["ply"])
+                        k = (tag, g["white"], g["black"], g["date"], g["ply"])
                         if k in old:
-                            for f in EVAL_FIELDS:
-                                if f in old[k]:
-                                    g[f] = old[k][f]
-                    doc = [{"tag": TAG, "games": games}]
+                            g.update(old[k])
+                    doc.append({"tag": tag, "games": games})
+                if doc:
                     tmp = OUT + ".tmp"
                     with open(tmp, "w") as f:
                         json.dump(doc, f)

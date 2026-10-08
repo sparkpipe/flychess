@@ -110,10 +110,11 @@ function findSel(){
   for (const m of DATA) m.games.forEach((g,gi)=>{ if (keyOf(m,gi)===selKey) sel = {m,g,gi}; });
 }
 function pickDefault(){
-  // live game first; otherwise FIRST game of first match (stable default, no yanking)
+  // live game first; otherwise first game of the NEWEST match (history stays above)
   for (const m of DATA) for (let i=m.games.length-1;i>=0;i--)
     if (m.games[i].open){ return keyOf(m,i); }
-  for (const m of DATA) if (m.games.length) return keyOf(m,0);
+  for (let i=DATA.length-1;i>=0;i--)
+    if (DATA[i].games.length) return keyOf(DATA[i],0);
   return null;
 }
 function saveSel(){ try { localStorage.setItem("flychess.selKey", selKey||""); localStorage.setItem("flychess.ply", String(ply)); } catch(e){} }

@@ -85,7 +85,8 @@ def main():
         # replenish buffer
         if time.time() - last_replenish > REPLENISH_S or len(pending) < CORES:
             if done_rows:
-                r = api("/submit", {"node": NODE, "results": done_rows})
+                r = api("/submit", {"node": NODE, "engine": "sf17", "depth": DEPTH,
+                                   "results": done_rows})
                 n_sub += r.get("stored", 0)
                 done_rows = []
             want = min(BUF_TARGET - len(pending), 20000)
@@ -140,8 +141,9 @@ def main():
                         k.score = s
                 elif line.startswith("bestmove"):
                     if k.cur is not None and k.score is not None:
-                        stm = 1 if k.cur.split()[1] == "w" else -1
-                        done_rows.append({"fen": k.cur, "cp": k.score * stm})
+                        # CONVENTION (DATA-CONVENTIONS.md): labels are stm-pov.
+                        # SF's score IS stm-pov — store verbatim, NEVER flip.
+                        done_rows.append({"fen": k.cur, "cp": k.score})
                     k.cur = None
                     k.score = None
         # watchdog

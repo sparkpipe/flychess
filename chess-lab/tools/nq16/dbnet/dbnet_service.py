@@ -64,17 +64,29 @@ def allocate(node, engine, depth, n):
     n = min(int(n), N_MAX)
     now = time.time()
     with lock:
-        con.execute("delete from allocations where state='open' and deadline < ?", (now,))
-        cur = get_cursor(engine, depth)
-        fens = []
-        rows = con.execute(
-            "select seq, fen from positions where seq > ? order by seq limit ?",
-            (cur, n)).fetchall()
-        if rows:
-            cur = rows[-1][0]
-            fens = [r[1] for r in rows]
-            con.execute("insert or replace into meta values (?,?)",
-                        (cursor_key(engine, depth), cur))
+        # re-serve expired leases (retry gap) — re-lease ONLY the n handed out;
+        # unserved expired rows stay in place for the next allocate
+        expired = [r[0] for r in con.execute(
+            "select distinct fen from allocations where state='open' and deadline < ?"
+            " limit ?", (now, n))]
+        fens = expired
+        if expired:
+            con.execute(
+                "update allocations set node=?, deadline=? where state='open'"
+                " and deadline < ? and fen in (select fen from ("
+                "  select distinct fen from allocations where state='open'"
+                "  and deadline < ? limit ?))",
+                (node, now + LEASE_S, now, now, n))
+        if len(fens) < n:
+            cur = get_cursor(engine, depth)
+            rows = con.execute(
+                "select seq, fen from positions where seq > ? order by seq limit ?",
+                (cur, n - len(fens))).fetchall()
+            if rows:
+                cur = rows[-1][0]
+                fens += [r[1] for r in rows]
+                con.execute("insert or replace into meta values (?,?)",
+                            (cursor_key(engine, depth), cur))
         con.executemany(
             "insert into allocations(fen, engine, depth, node, state, allocated_at, deadline)"
             " values (?,?,?,?, 'open', ?, ?)",
@@ -83,18 +95,20 @@ def allocate(node, engine, depth, n):
     return fens
 
 
-def submit(node, results):
+def submit(node, results, engine="sf17", depth=12):
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
     with lock:
         for r in results:
+            # write the label directly — a late result is still a valid result,
+            # even if its lease was reclaimed mid-flight
             con.execute(
                 "insert or replace into labels(fen, engine, depth, cp, by_node, labeled_at)"
-                " select ?, engine, depth, ?, ?, ? from allocations"
-                "  where fen=? and state='open' order by id desc limit 1",
-                (r["fen"], int(r["cp"]), node, ts, r["fen"]))
+                " values (?,?,?,?,?,?)",
+                (r["fen"], engine, depth, int(r["cp"]), node, ts))
         con.executemany(
-            "update allocations set state='done' where fen=? and state='open'",
-            [(r["fen"],) for r in results])
+            "update allocations set state='done' where fen=? and state='open'"
+            " and engine=? and depth=?",
+            [(r["fen"], engine, depth) for r in results])
         con.commit()
     return len(results)
 
@@ -155,7 +169,8 @@ class H(BaseHTTPRequestHandler):
                             int(body.get("depth", 12)), body.get("n", 2000))
             return self._json(200, {"allocated": len(fens), "fens": fens})
         if self.path == "/submit":
-            k = submit(body.get("node", "?"), body.get("results", []))
+            k = submit(body.get("node", "?"), body.get("results", []),
+                       body.get("engine", "sf17"), int(body.get("depth", 12)))
             return self._json(200, {"stored": k})
         self._json(404, {"err": "no"})
 

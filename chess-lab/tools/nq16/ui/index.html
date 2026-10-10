@@ -506,21 +506,45 @@ function evalOrder(g, startPly) {
 }
 
 async function sweepGame(m, gi, startPly) {
-  const g = m.games[gi];
   const key = keyOf(m, gi);
   evalTargetKey = key;
+  const fens = m.games[gi].fens;
   for (const d of [12, 20, 25]) {
     const ek = "evals_d" + d;
-    const order = evalOrder(g, startPly);
-    for (const i of order) {
-      if (evalTargetKey !== key) return;  // user switched games
-      const arr = g[ek] = g[ek] || [];
-      while (arr.length < g.fens.length) arr.push(undefined);
-      if (arr[i] !== undefined && arr[i] !== 0) continue;  // already done
-      const cp = await odEval(g.fens[i], d);
-      if (cp !== null && cp !== undefined) {
-        arr[i] = cp;
-        renderAll();  // live update
+    // re-resolve the game from DATA each iteration — the poll replaces objects
+    const resolve = () => {
+      for (const mm of DATA) for (let j = 0; j < mm.games.length; j++)
+        if (keyOf(mm, j) === key) return mm.games[j];
+      return null;
+    };
+    let g = resolve();
+    if (!g) { evalTargetKey = null; return; }
+    const arr = g[ek] = g[ek] || [];
+    while (arr.length < fens.length) arr.push(undefined);
+    for (let i = startPly; i < fens.length; i++) {
+      if (evalTargetKey !== key) return;
+      if (arr[i] !== undefined && arr[i] !== 0) continue;
+      const cp = await odEval(fens[i], d);
+      g = resolve();
+      if (!g) { evalTargetKey = null; return; }
+      const a2 = g[ek] = g[ek] || [];
+      while (a2.length < fens.length) a2.push(undefined);
+      if (cp !== null && cp !== undefined && (a2[i] === undefined || a2[i] === 0)) {
+        a2[i] = cp;
+        renderAll();
+      }
+    }
+    for (let i = 0; i < startPly; i++) {
+      if (evalTargetKey !== key) return;
+      if (arr[i] !== undefined && arr[i] !== 0) continue;
+      const cp = await odEval(fens[i], d);
+      g = resolve();
+      if (!g) { evalTargetKey = null; return; }
+      const a2 = g[ek] = g[ek] || [];
+      while (a2.length < fens.length) a2.push(undefined);
+      if (cp !== null && cp !== undefined && (a2[i] === undefined || a2[i] === 0)) {
+        a2[i] = cp;
+        renderAll();
       }
     }
   }

@@ -161,7 +161,8 @@ function renderSide(){
         prevOpen = openLabel;
       } else prevOpen = null;
       if (keyOf(m,gi)===selKey) b.classList.add("sel");
-      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll(); };
+      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll();
+      sweepGame(m, gi, ply); };
       md.appendChild(b);
     });
     root.appendChild(md);
@@ -463,10 +464,67 @@ function renderPv(){
 }
 
 function renderAll(){
-  findSel();  // resolve sel from selKey before rendering — click must take effect immediately
+  findSel();
+  if (sel && evalTargetKey === null && selKey !== null) {
+    const m = sel.m, gi = sel.gi;
+    const anyMissing = [12,20,25].some(d => {
+      const a = sel.g["evals_d"+d];
+      return !a || a.some(v => v === undefined || v === 0);
+    });
+    if (anyMissing) sweepGame(m, gi, ply);
+  }  // resolve sel from selKey before rendering — click must take effect immediately
   for (const f of [renderSide, renderHdr, renderBoard, renderMoves, renderChart, renderPv]){
     try { f(); } catch(e){ console.error(f.name, e); }
   }
+}
+
+
+// On-demand evals: when a game is selected, evaluate d12 for the selected ply
+// first, then remaining plies forward, then from beginning. Then d20, d25.
+const EVALBOX = "http://192.168.50.4:8124";
+let evalTargetKey = null;  // "tag#gi" of the game being eval'd
+
+async function odEval(fen, depth) {
+  try {
+    const r = await fetch(`${EVALBOX}/eval`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({fen, depth})
+    });
+    const j = await r.json();
+    return j.cp;
+  } catch(e) { return null; }
+}
+
+function evalOrder(g, startPly) {
+  // selected ply first, then forward, then from beginning
+  const n = g.fens.length;
+  const out = [];
+  for (let i = startPly; i < n; i++) out.push(i);
+  for (let i = 0; i < startPly; i++) out.push(i);
+  return out;
+}
+
+async function sweepGame(m, gi, startPly) {
+  const g = m.games[gi];
+  const key = keyOf(m, gi);
+  evalTargetKey = key;
+  for (const d of [12, 20, 25]) {
+    const ek = "evals_d" + d;
+    const order = evalOrder(g, startPly);
+    for (const i of order) {
+      if (evalTargetKey !== key) return;  // user switched games
+      const arr = g[ek] = g[ek] || [];
+      while (arr.length < g.fens.length) arr.push(undefined);
+      if (arr[i] !== undefined && arr[i] !== 0) continue;  // already done
+      const cp = await odEval(g.fens[i], d);
+      if (cp !== null && cp !== undefined) {
+        arr[i] = cp;
+        renderAll();  // live update
+      }
+    }
+  }
+  evalTargetKey = null;
 }
 
 // chart: click = jump, drag = zoom to range, double-click = reset

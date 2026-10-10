@@ -115,9 +115,10 @@ def main():
             time.sleep(5)
             continue
         changed = False
-        for g in games:
+        for d in DEPTHS:  # operator: all games at d12, then d20, then d25
+          for g in games:
             n = len(g["fens"])
-            for d in DEPTHS:
+            if True:
                 ek = f"evals_d{d}"
                 cur = g.get(ek) or []
                 # find the next ply to fill: first gap OR first suspect zero

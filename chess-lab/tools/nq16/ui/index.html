@@ -110,11 +110,10 @@ function findSel(){
   for (const m of DATA) m.games.forEach((g,gi)=>{ if (keyOf(m,gi)===selKey) sel = {m,g,gi}; });
 }
 function pickDefault(){
-  // live game first; otherwise first game of the NEWEST match (history stays above)
+  // live game first; otherwise first game of the NEWEST match (top of list)
   for (const m of DATA) for (let i=m.games.length-1;i>=0;i--)
     if (m.games[i].open){ return keyOf(m,i); }
-  for (let i=DATA.length-1;i>=0;i--)
-    if (DATA[i].games.length) return keyOf(DATA[i],0);
+  if (DATA.length) return keyOf(DATA[DATA.length-1], 0);
   return null;
 }
 function saveSel(){ try { localStorage.setItem("flychess.selKey", selKey||""); localStorage.setItem("flychess.ply", String(ply)); } catch(e){} }
@@ -127,7 +126,7 @@ function restoreSel(){
 
 function renderSide(){
   const root = $("matchlist"); root.textContent = "";
-  for (const m of DATA){
+  for (const m of [...DATA].reverse()){
     const md = document.createElement("div"); md.className="match";
     const t = document.createElement("div"); t.className="tag"; t.textContent = m.tag; md.appendChild(t);
     // match score summary: wins per engine across all games
@@ -234,6 +233,19 @@ function fmtEval(v){
   const u = v/100;
   return (u>=0?"+":"") + u.toFixed(1);
 }
+
+// chess-site move display: piece glyph + SAN body; pawns show destination only
+const GLYPH = {N:"\u2658", B:"\u2657", R:"\u2656", Q:"\u2655", K:"\u2654"};
+function fmtMove(san){
+  if (!san) return "";
+  if (san.startsWith("O-O")) return san;  // castling as-is
+  const p = san[0];
+  if (GLYPH[p]) return GLYPH[p] + san.slice(1);
+  // pawn move: strip file prefix if it's a simple advance (e4 not e4 already
+  // fine; exd4 -> x d4 for captures)
+  return san.replace(/^([a-h])x/, "x");
+}
+
 function renderMoves(){
   const mv = $("moves"); mv.textContent = "";
   if (!sel) return;
@@ -272,7 +284,7 @@ function renderMoves(){
       row.appendChild(document.createElement("span"));
       skipWhite = false;
     } else {
-      const s = document.createElement("span"); s.className="mv"; s.textContent = g.sans[wIdx];
+      const s = document.createElement("span"); s.className="mv"; s.textContent = fmtMove(g.sans[wIdx]);
       if (wIdx === ply-1) s.classList.add("cur");
       s.onclick = ()=>{ ply = wIdx+1; userNav = true; $("followcb").checked=false; renderAll(); };
       row.appendChild(s);
@@ -286,7 +298,7 @@ function renderMoves(){
     // black cell
     if (idx < cells.length){
       const bIdx = cells[idx];
-      const s = document.createElement("span"); s.className="mv"; s.textContent = g.sans[bIdx];
+      const s = document.createElement("span"); s.className="mv"; s.textContent = fmtMove(g.sans[bIdx]);
       if (bIdx === ply-1) s.classList.add("cur");
       s.onclick = ()=>{ ply = bIdx+1; userNav = true; $("followcb").checked=false; renderAll(); };
       row.appendChild(s);

@@ -276,3 +276,49 @@ Everything reuses the stage-6 stack: the pool schema, the vectorized
 tb_step + reinforce-best margin, the per-family gate table, the
 checklist-law pass floor. The differential head (D1/D2) attaches after
 T1. Puzzle sources download to ~/chess-lab/puzzles/.
+
+## THE OPENING PROGRAM — initiative-first (operator directive, 2026-09-18)
+
+"fly will know the basics, master the endgame and tactics, so it can find
+paths to winning endgames. the final piece is opening training. There is
+the book part, basically memorization, but that should not be the primary
+signal, the initiative training is the primary with the book training a
+backstop. we need to figure out how to effectively train the initiative
+play. one idea is to find all miniatures, 25 moves or less by strong
+players that were decisive"
+
+### The doctrine
+- PRIMARY signal: initiative play — the race doctrine (every move counts,
+  dual-purpose moves, the +1/+2/+3 initiative bands, asymmetric scoring
+  win 1.0 / draw 0.4W / 0.45B — draws are mini-losses, so complicating
+  illogical moves that raise the win rate beat drawing squeezes).
+- BACKSTOP signal: book memorization (the H01 memory graft is the natural
+  substrate later; the fly itself trains the initiative).
+
+### The miniature corpus (the first data source)
+- ALL decisive miniatures ≤25 moves by strong players (both players
+  2400+, or the winner 2500+): the initiative made visible — each is a
+  race won. Sources: Lichess elite pools (CC0), plus the historical
+  masters (Morphy on down — the operator's exemplar).
+- Per-position labels, derived not memorized:
+  * the INITIATIVE LEDGER: after each move, who attacks more squares,
+    threatens more pieces, gains tempo (the +1/+2/+3 band from the
+    doctrine) — computable from the board, verified against the game's
+    outcome (did the band-holder convert?).
+  * MOVE GRADES: a move is GOOD-INITIATIVE if it grows the ledger (or
+    holds the band under attack); Stockfish grades alternatives per the
+    tolerance doctrine — SF agreement is the calibration, not the law.
+  * OUTCOME LABELS: game-theoretic value under the asymmetric scoring
+    (White draw = 0.4, Black draw = 0.45) — the training target says
+    "complicate rather than squeeze."
+- Coverage: the full opening phase (moves 1-12 say), all openings — the
+  operator's generalization law: not named-gambit playlists, but the same
+  need-for-speed everywhere.
+
+### Training
+- Stage-7 milestones = per-ledger-band move selection (does the fly pick
+  the band-growing move at ≥0.98 in band-critical positions), plus the
+  miniature conversion battery (from miniatures' critical positions, the
+  fly must choose the initiative line over the quiet line at 0.98).
+- The book backstop: opening-book positions as a REPLAY battery (like
+  maintain_regressions) so memorization is checked, never primary.

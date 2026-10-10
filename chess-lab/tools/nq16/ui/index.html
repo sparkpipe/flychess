@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>flychess — live games</title>
+<style>
+  :root { --bg:#14161a; --panel:#1d2026; --line:#2c313a; --fg:#d8dce2; --dim:#8a919c; --acc:#5aa9e6; --gold:#e0b05a; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--fg); font:14px/1.45 -apple-system,Helvetica,Arial,sans-serif; display:flex; height:100vh; overflow:hidden; }
+  #side { width:320px; min-width:260px; background:var(--panel); border-right:1px solid var(--line); overflow-y:auto; padding:10px; }
+  #side h1 { font-size:15px; margin:4px 0 10px; color:var(--gold); }
+  .match { margin-bottom:14px; }
+  .match .tag { color:var(--acc); font-weight:600; font-size:12px; letter-spacing:.4px; margin-bottom:4px; }
+  .mrow.bk .mno { color:#4a515e; }
+  .bkmv { color:#5f6774 !important; font-style:italic; }
+  .gbtn { display:block; width:100%; text-align:left; background:none; color:var(--fg); border:1px solid transparent; border-radius:6px; padding:5px 8px; cursor:pointer; font:inherit; }
+  .gbtn > span:first-child { display:flex; justify-content:space-between; gap:6px; }
+  .score { font-size:12px; color:var(--gold); padding:2px 8px 6px; font-variant-numeric:tabular-nums; }
+  .openlab { font-size:11px; color:#8b93a1; padding-top:2px; }
+  .gbtn:hover { border-color:var(--line); }
+  .gbtn.sel { background:#262b33; border-color:var(--acc); }
+  .live-dot { width:8px; height:8px; border-radius:50%; background:#e0565a; display:inline-block; margin-right:5px; animation:pulse 1.6s infinite; }
+  @keyframes pulse { 50% {opacity:.35;} }
+  .res { color:var(--dim); font-variant-numeric:tabular-nums; }
+  #main { flex:1; display:flex; flex-direction:column; padding:14px 18px; min-width:0; }
+  #hdr { display:flex; align-items:baseline; gap:14px; margin-bottom:10px; flex-wrap:wrap; }
+  #hdr .players { font-size:17px; font-weight:600; }
+  #hdr .meta { color:var(--dim); font-size:12px; }
+  #center { display:flex; gap:18px; flex:1; min-height:0; }
+  #leftcol { display:flex; flex-direction:column; gap:8px; }
+  #board { width:min(56vh,480px); height:min(56vh,480px); display:grid; grid-template:repeat(8,1fr)/repeat(8,1fr); border:2px solid var(--line); border-radius:4px; overflow:hidden; user-select:none; }
+  .sq { position:relative; display:flex; align-items:center; justify-content:center; }
+  .lt { background:#e8ddc7; } .dk { background:#a97f5f; }
+  .sq img { width:90%; height:90%; pointer-events:none; }
+  .sq.lastmv::after { content:""; position:absolute; inset:0; background:rgba(90,169,230,.28); }
+  #nav { display:flex; gap:6px; align-items:center; }
+  #nav button { background:#262b33; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 12px; cursor:pointer; font:inherit; }
+  #nav button:hover { border-color:var(--acc); }
+  #nav .plyinfo { color:var(--dim); font-variant-numeric:tabular-nums; margin:0 8px; min-width:70px; text-align:center; }
+  #nav #analyze { padding:4px 10px; opacity:.8; }
+  #pvline { font:10px/1.5 "SF Mono",Menlo,monospace; color:var(--dim); min-height:16px;
+             max-width:min(56vh,480px); white-space:nowrap; overflow:hidden; }
+  #pvline b { color:#b08d4a; font-weight:500; font-size:10px; }
+  #rightcol { flex:1; display:flex; flex-direction:column; gap:10px; min-width:280px;
+              position:relative; z-index:2; background:var(--bg); }
+  #moves { flex:1; overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; min-height:120px; position:relative; z-index:3; }
+  .mrow { display:grid; grid-template-columns:32px 1fr 56px 1fr 56px; gap:2px; padding:1px 0; }
+  .mno { color:var(--fg); opacity:.85; text-align:right; margin-right:6px; font-variant-numeric:tabular-nums; }
+  .mv { cursor:pointer; padding:0 4px; border-radius:4px; font-variant-numeric:tabular-nums; }
+  .mv:hover { background:#2c313a; }
+  .mv.cur { background:var(--acc); color:#10131a; font-weight:600; }
+  .ev { color:var(--dim); font-size:12px; text-align:right; font-variant-numeric:tabular-nums; }
+  .ev.pos { color:#9fd0a9; } .ev.neg { color:#d9938f; }
+  #chartcard { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px 10px; }
+  #chartcard .legend { display:flex; gap:14px; font-size:11px; color:var(--dim); margin-bottom:4px; align-items:center; }
+  .sw { width:14px; height:3px; display:inline-block; vertical-align:middle; margin-right:4px; border-radius:2px; }
+  #chart { width:100%; height:170px; display:block; cursor:crosshair; }
+  #status { color:var(--dim); font-size:11px; padding:6px 2px 0; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>flychess live matches</h1>
+  <div id="matchlist"></div>
+</div>
+<div id="main">
+  <div id="hdr">
+    <span class="players" id="players">loading…</span>
+    <span class="meta" id="meta"></span>
+  </div>
+  <div id="center">
+    <div id="leftcol">
+      <div id="board"></div>
+      <div id="nav">
+        <button id="first">⏮</button><button id="prev">◀</button>
+        <button id="analyze" title="toggle analysis">⏸</button>
+        <button id="next">▶</button><button id="last">⏭</button>
+        <span class="plyinfo" id="plyinfo">–</span>
+        <label style="color:var(--dim);font-size:12px;margin-left:4px"><input type="checkbox" id="followcb" checked> follow live</label>
+      </div>
+      <div id="pvline"></div>
+    </div>
+    <div id="rightcol">
+      <div id="chartcard">
+        <div class="legend">
+          <span><span class="sw" style="background:#6b7280"></span>SF d12</span>
+          <span><span class="sw" style="background:#5aa9e6"></span>SF d20</span>
+          <span><span class="sw" style="background:#e0b05a"></span>SF d25</span>
+          <span style="margin-left:auto">white-pov cp · click chart to jump</span>
+        </div>
+        <svg id="chart" preserveAspectRatio="none"></svg>
+      </div>
+      <div id="moves"></div>
+    </div>
+  </div>
+  <div id="status">polling every 12s — your navigation is never overridden</div>
+</div>
+<script src="pieces.js"></script>
+<script>
+"use strict";
+let DATA = [], selKey = null, ply = 0, userNav = false;
+const $ = id => document.getElementById(id);
+const DEPTHS = [12, 20, 25];
+const DCOL = {12:"#6b7280", 20:"#5aa9e6", 25:"#e0b05a"};
+
+function keyOf(m,gi){ return m.tag + "#" + gi; }
+let sel = null;
+function findSel(){
+  sel = null;
+  for (const m of DATA) m.games.forEach((g,gi)=>{ if (keyOf(m,gi)===selKey) sel = {m,g,gi}; });
+}
+function pickDefault(){
+  // live game first; otherwise first game of the NEWEST match (top of list)
+  for (const m of DATA) for (let i=m.games.length-1;i>=0;i--)
+    if (m.games[i].open){ return keyOf(m,i); }
+  if (DATA.length) return keyOf(DATA[DATA.length-1], 0);
+  return null;
+}
+function saveSel(){ try { localStorage.setItem("flychess.selKey", selKey||""); localStorage.setItem("flychess.ply", String(ply)); } catch(e){} }
+function restoreSel(){
+  let k = null; try { k = localStorage.getItem("flychess.selKey"); } catch(e){}
+  if (k){ selKey = k; findSel(); if (sel){ const p = parseInt(localStorage.getItem("flychess.ply")||"0",10); ply = Math.max(0, Math.min(p, sel.g.fens.length-1)); return; } }
+  selKey = null;
+  const d = pickDefault(); if (d){ selKey = d; findSel(); ply = sel && sel.g.open ? sel.g.fens.length-1 : 0; }
+}
+
+function renderSide(){
+  const root = $("matchlist"); root.textContent = "";
+  for (const m of [...DATA].reverse()){
+    const md = document.createElement("div"); md.className="match";
+    const t = document.createElement("div"); t.className="tag"; t.textContent = m.tag; md.appendChild(t);
+    // match score summary: wins per engine across all games
+    const wins = {};
+    let draws = 0;
+    for (const g of m.games){
+      if (g.result==="1-0") wins[g.white]=(wins[g.white]||0)+1;
+      else if (g.result==="0-1") wins[g.black]=(wins[g.black]||0)+1;
+      else if (g.result==="1/2-1/2") draws++;
+    }
+    const names = [...new Set(m.games.flatMap(g=>[g.white,g.black]))];
+    if (names.length){
+      const sc = document.createElement("div"); sc.className="score";
+      sc.textContent = names.map(n=>`${n} ${wins[n]||0}`).join("  ·  ") + (draws? `  ·  draws ${draws}` : "");
+      md.appendChild(sc);
+    }
+    let prevOpen = null;
+    m.games.forEach((g,gi)=>{
+      const b = document.createElement("button"); b.className="gbtn";
+      const nm = document.createElement("span");
+      if (g.open){ const d=document.createElement("span"); d.className="live-dot"; nm.appendChild(d); }
+      nm.appendChild(document.createTextNode(g.white + " – " + g.black));
+      const r = document.createElement("span"); r.className="res";
+      r.textContent = g.open ? g.ply+" plies" : g.result;
+      b.appendChild(nm); b.appendChild(r);
+      // opening book label + pairing marker (same start position as previous game = colors reversed)
+      const openLabel = g.opening || "";
+      if (openLabel){
+        const ol = document.createElement("div"); ol.className="openlab";
+        ol.textContent = openLabel + (prevOpen===openLabel ? " · colors reversed" : "");
+        b.appendChild(ol);
+        prevOpen = openLabel;
+      } else prevOpen = null;
+      if (keyOf(m,gi)===selKey) b.classList.add("sel");
+      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll();
+      sweepGame(m, gi, ply); };
+      md.appendChild(b);
+    });
+    root.appendChild(md);
+  }
+}
+
+function renderBoard(){
+  const bd = $("board"); bd.textContent = "";
+  if (!sel) return;
+  const fen = sel.g.fens[Math.min(ply, sel.g.fens.length-1)];
+  const rows = fen.split(" ")[0].split("/");
+  if (rows.length !== 8) return;
+  const lastmv = sel.g.ucis[Math.min(ply, sel.g.ucis.length)-1] || "";
+  const from = lastmv.slice(0,2), to = lastmv.slice(2,4);
+  for (let r=0;r<8;r++){
+    let f = 0;
+    for (const ch of rows[r]){
+      if (ch >= "1" && ch <= "8"){
+        const nskip = ch.charCodeAt(0) - 48;
+        for (let k=0;k<nskip;k++){
+          const sq = document.createElement("div");
+          sq.className = "sq " + (((r+f)%2===0) ? "lt":"dk");
+          bd.appendChild(sq);
+          f++;
+        }
+        continue;
+      }
+      const sq = document.createElement("div");
+      sq.className = "sq " + (((r+f)%2===0) ? "lt":"dk");
+      const name = String.fromCharCode(97+f) + (8-r);
+      if (name===from || name===to) sq.classList.add("lastmv");
+      const img = document.createElement("img");
+      img.alt = ch;
+      img.src = (window.PIECES && PIECES[(ch===ch.toUpperCase() ? "w":"b") + ch.toUpperCase()]) ||
+                ("pieces/" + (ch===ch.toUpperCase() ? "w":"b") + ch.toUpperCase() + ".svg");
+      sq.appendChild(img);
+      bd.appendChild(sq);
+      f++;
+    }
+    while (f < 8){
+      const sq = document.createElement("div");
+      sq.className = "sq " + (((r+f)%2===0) ? "lt":"dk");
+      bd.appendChild(sq); f++;
+    }
+  }
+  if (bd.children.length !== 64) { bd.textContent = ""; return; }
+}
+
+function renderHdr(){
+  if (!sel){ $("players").textContent="no games yet"; $("meta").textContent=""; return; }
+  const g = sel.g;
+  $("players").textContent = `Game ${sel.gi+1} · ${g.white}  vs  ${g.black}` + (g.opening? ` · ${g.opening}` : "");
+  const have = DEPTHS.filter(d => Array.isArray(g["evals_d"+d]));
+  $("meta").textContent = `${sel.m.tag} · ${g.result==="*"?"playing":g.result} · ply ${ply}/${g.fens.length-1}`
+    + (g.termination? " · "+g.termination : "")
+    + (have.length? " · evals: "+have.map(d=>"d"+d).join("/") : " · evals pending");
+}
+
+function bestEval(g, i){  // highest-depth eval at ply i, or null
+  for (const d of [25,20,12]){
+    const a = g["evals_d"+d];
+    if (Array.isArray(a) && i < a.length && a[i] != null) return a[i];
+  }
+  return null;
+}
+function fmtEval(v){
+  if (v == null) return "";
+  if (Math.abs(v) > 9000) return (v>0?"M":"-M") + (Math.abs(v)-10000);
+  const u = v/100;
+  return (u>=0?"+":"") + u.toFixed(1);
+}
+
+// chess-site move display: piece glyph + SAN body; pawns show destination only
+const GLYPH = {N:"\u2658", B:"\u2657", R:"\u2656", Q:"\u2655", K:"\u2654"};
+function fmtMove(san){
+  if (!san) return "";
+  if (san.startsWith("O-O")) return san;  // castling as-is
+  const p = san[0];
+  if (GLYPH[p]) return GLYPH[p] + san.slice(1);
+  // pawn move: strip file prefix if it's a simple advance (e4 not e4 already
+  // fine; exd4 -> x d4 for captures)
+  return san.replace(/^([a-h])x/, "x");
+}
+
+function renderMoves(){
+  const mv = $("moves"); mv.textContent = "";
+  if (!sel) return;
+  const g = sel.g;
+  // book openings: game may start with black to move
+  let blackFirst = false;
+  try { blackFirst = g.fens[0].split(" ")[1] === "b"; } catch(e) {}
+  const cells = [];  // flat [{san, i}]
+  for (let i=0;i<g.sans.length;i++) cells.push(i);
+  // book prefix (opening moves before the game start) — dimmed, true numbering
+  const book = g.book_san || [];
+  let bn = 1, bi = 0;
+  while (bi < book.length){
+    const row = document.createElement("div"); row.className="mrow bk";
+    const no = document.createElement("span"); no.className="mno"; no.textContent=(bn)+"."; row.appendChild(no);
+    const w = document.createElement("span"); w.className="mv bkmv"; w.textContent = book[bi++] || "";
+    row.appendChild(w); row.appendChild(document.createElement("span"));
+    if (bi < book.length){
+      const b2 = document.createElement("span"); b2.className="mv bkmv"; b2.textContent = book[bi++] || "";
+      row.appendChild(b2); row.appendChild(document.createElement("span"));
+    } else {
+      row.appendChild(document.createElement("span"));
+      row.appendChild(document.createElement("span"));
+    }
+    bn++;
+    mv.appendChild(row);
+  }
+  let idx = 0, moveno = Math.floor(book.length / 2) + 1, skipWhite = blackFirst;
+  while (idx < cells.length){
+    const row = document.createElement("div"); row.className="mrow";
+    const no = document.createElement("span"); no.className="mno"; no.textContent=(moveno)+"."; row.appendChild(no);
+    // white cell (may be empty for the first row of black-first games)
+    const wIdx = skipWhite ? -1 : cells[idx];
+    if (skipWhite){
+      row.appendChild(document.createElement("span"));
+      row.appendChild(document.createElement("span"));
+      skipWhite = false;
+    } else {
+      const s = document.createElement("span"); s.className="mv"; s.textContent = fmtMove(g.sans[wIdx]);
+      if (wIdx === ply-1) s.classList.add("cur");
+      s.onclick = ()=>{ ply = wIdx+1; userNav = true; $("followcb").checked=false; renderAll(); };
+      row.appendChild(s);
+      const ev = document.createElement("span");
+      const v = bestEval(g, wIdx+1);
+      ev.className = "ev" + (v==null?"":(v>50?" pos":(v<-50?" neg":"")));
+      ev.textContent = fmtEval(v);
+      row.appendChild(ev);
+      idx++;
+    }
+    // black cell
+    if (idx < cells.length){
+      const bIdx = cells[idx];
+      const s = document.createElement("span"); s.className="mv"; s.textContent = fmtMove(g.sans[bIdx]);
+      if (bIdx === ply-1) s.classList.add("cur");
+      s.onclick = ()=>{ ply = bIdx+1; userNav = true; $("followcb").checked=false; renderAll(); };
+      row.appendChild(s);
+      const ev = document.createElement("span");
+      const v = bestEval(g, bIdx+1);
+      ev.className = "ev" + (v==null?"":(v>50?" pos":(v<-50?" neg":"")));
+      ev.textContent = fmtEval(v);
+      row.appendChild(ev);
+      idx++;
+    } else {
+      row.appendChild(document.createElement("span"));
+      row.appendChild(document.createElement("span"));
+    }
+    mv.appendChild(row);
+    moveno++;
+  }
+  const cur = mv.querySelector(".mv.cur");
+  if (cur) cur.scrollIntoView({block:"nearest"});
+  else mv.scrollTop = 0;  // ply 0 or nothing selected: show first moves
+}
+
+let chartWin = null;  // [a,b] ply window or null = full
+function renderChart(){
+  const svg = $("chart");
+  const W = svg.clientWidth || 600, H = 170;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.textContent = "";
+  const ns = "http://www.w3.org/2000/svg";
+  const mk = (t,at)=>{ const e=document.createElementNS(ns,t); for(const k in at) e.setAttribute(k,at[k]); svg.appendChild(e); return e; };
+  const L=34, Rp=6, T=6, B=16;
+  const plotW = W-L-Rp, plotH = H-T-B;
+  const clamp = v => Math.max(-1000, Math.min(1000, v));
+  const y = v => T + plotH/2 - (clamp(v)/1000)*(plotH/2);
+  for (const gv of [-1000,-500,0,500,1000]){
+    mk("line",{x1:L,y1:y(gv),x2:W-Rp,y2:y(gv),stroke:gv===0?"#3a4150":"#262b33","stroke-width":gv===0?1.4:1});
+    const t = mk("text",{x:L-4,y:y(gv)+3,"text-anchor":"end","font-size":9,fill:"#8a919c"});
+    t.textContent = gv===0?"0":(gv>0?"+":"")+(gv/100);
+  }
+  if (!sel){ const t=mk("text",{x:W/2,y:H/2,"text-anchor":"middle","font-size":11,fill:"#8a919c"}); t.textContent="no evals yet"; return; }
+  const g = sel.g;
+  const series = DEPTHS.map(d=>g["evals_d"+d]).filter(a=>Array.isArray(a)&&a.length);
+  if (!series.length){
+    const t=mk("text",{x:W/2,y:H/2,"text-anchor":"middle","font-size":11,fill:"#8a919c"});
+    t.textContent="evals pending — SF d12/d20/d25 in progress";
+    return;
+  }
+  const n = Math.max(...series.map(a=>a.length));
+  const wa = chartWin ? Math.max(0, Math.min(chartWin[0], n-1)) : 0;
+  const wb = chartWin ? Math.min(n-1, Math.max(chartWin[1], wa+1)) : n-1;
+  const span = wb - wa || 1;
+  const x = i => L + ((i-wa)/span)*plotW;
+  let drew = false;
+  for (const d of DEPTHS){
+    const ev = g["evals_d"+d];
+    if (!Array.isArray(ev) || !ev.length) continue;
+    let path = "", pen = false;
+    for (let i=wa;i<=wb && i<ev.length;i++){
+      if (ev[i]==null){ pen=false; continue; }
+      path += (pen?"L":"M") + x(i).toFixed(1) + " " + y(ev[i]).toFixed(1) + " ";
+      pen = true;
+    }
+    if (!path) continue;
+    drew = true;
+    mk("path",{d:path.trim(),fill:"none",stroke:DCOL[d],"stroke-width":d===25?2:1.3,"stroke-linejoin":"round",opacity:d===12?0.85:1});
+  }
+  if (!drew) return;
+  const xp = x(Math.min(ply, wb));
+  mk("line",{x1:xp,y1:T,x2:xp,y2:H-B,stroke:"#e0565a","stroke-width":1.2,"stroke-dasharray":"3 3"});
+  for (const frac of [0,.25,.5,.75,1]){
+    const i = wa + Math.round(frac*span);
+    const t = mk("text",{x:L+frac*plotW,y:H-4,"text-anchor":"middle","font-size":9,fill:"#8a919c"});
+    t.textContent = i;
+  }
+  if (chartWin){
+    const t = mk("text",{x:W-Rp,y:T+8,"text-anchor":"end","font-size":9,fill:"#8a919c"});
+    t.textContent = "zoomed — double-click to reset";
+  }
+}
+
+let analysisOn = true;
+$("analyze").onclick = ()=>{
+  analysisOn = !analysisOn;
+  $("analyze").textContent = analysisOn ? "⏸" : "▶";
+  fetch("/focus", {method:"POST", body: JSON.stringify(
+    Object.assign({pause: !analysisOn}, (sel ? {tag: sel.m.tag, gi: sel.gi} : {})))}).catch(()=>{});
+  renderPv();
+};
+
+const GLYPH_PV = {N:"♘",B:"♗",R:"♖",Q:"♕",K:"♔"};
+function renderPv(){
+  const el = $("pvline");
+  el.textContent = "";
+  if (!sel) return;
+  const g = sel.g;
+  const i = Math.min(ply, g.fens.length - 1);
+  if (!analysisOn){
+    const b = document.createElement("b");
+    b.textContent = "analysis paused";
+    el.appendChild(b);
+    return;
+  }
+  const have = DEPTHS.filter(d => Array.isArray(g["pv_d"+d])).map(d => "d"+d);
+  for (const d of [25,20,12]){
+    const a = g["evals_d"+d], p = g["pv_d"+d];
+    const hasLines = Array.isArray(p) && p[i] && String(p[i]).includes("|");
+    if (!hasLines)
+      continue;
+    const raw = p[i];
+    const b = document.createElement("b");
+    b.textContent = `SF d${d} top-5`;
+    el.appendChild(b);
+    if (raw && raw.includes("|")){
+      for (const line of raw.split(" ;; ").slice(0,5)){
+        const [cp, moves] = line.split("|");
+        const v = parseInt(cp, 10);
+        const sc = Math.abs(v) > 9000
+          ? (v>0?"M"+(Math.abs(v)-10000):"-M"+(Math.abs(v)-10000))
+          : ((v/100)>=0?"+":"")+(v/100).toFixed(2);
+        const row = document.createElement("div");
+        const s1 = document.createElement("span");
+        s1.style.cssText = "display:inline-block;min-width:52px;color:var(--gold);font-variant-numeric:tabular-nums";
+        s1.textContent = sc;
+        row.appendChild(s1);
+        row.appendChild(document.createTextNode(" "));
+        // chess-site style: move number + piece glyph + SAN
+        let white = g.fens[i].split(" ")[1] === "w";
+        let moveNo = parseInt(g.fens[i].split(" ")[5], 10) || 1;
+        let firstTok = true;
+        for (const tok of moves.split(" ")){
+          // number only before white's move, or before black's first move of the line
+          if (white || firstTok){
+            const numTag = white ? (moveNo + ".") : (moveNo + "…");
+            const nspan = document.createElement("span");
+            nspan.style.cssText = "opacity:.6;margin-right:1px";
+            nspan.textContent = numTag;
+            row.appendChild(nspan);
+          }
+          firstTok = false;
+          const gl = GLYPH_PV[tok[0]];
+          if (gl && !tok.startsWith("O-O")){
+            const pc = document.createElement("span");
+            pc.className = white ? "wp" : "bp";
+            pc.style.cssText = "font-size:13px;line-height:1";
+            pc.textContent = gl;
+            row.appendChild(pc);
+            row.appendChild(document.createTextNode(tok.slice(1) + " "));
+          } else {
+            row.appendChild(document.createTextNode(tok + " "));
+          }
+          if (white) white = false; else { white = true; moveNo += 1; }
+        }
+        el.appendChild(row);
+      }
+    } else {
+      el.appendChild(document.createTextNode(" (lines computing…)"));
+    }
+    return;
+  }
+  const b0 = document.createElement("b");
+  b0.textContent = have.length ? `SF17 top-5 (${have.join("/")} done — deeper pending)` : "analysis pending (SF17 sweep running)";
+  el.appendChild(b0);
+}
+
+function renderAll(){
+  findSel();
+  if (sel && evalTargetKey === null && selKey !== null) {
+    const m = sel.m, gi = sel.gi;
+    const anyMissing = [12,20,25].some(d => {
+      const a = sel.g["evals_d"+d];
+      return !a || a.some(v => v === undefined || v === 0);
+    });
+    if (anyMissing) sweepGame(m, gi, ply);
+  }  // resolve sel from selKey before rendering — click must take effect immediately
+  for (const f of [renderSide, renderHdr, renderBoard, renderMoves, renderChart, renderPv]){
+    try { f(); } catch(e){ console.error(f.name, e); }
+  }
+}
+
+
+// On-demand evals: when a game is selected, evaluate d12 for the selected ply
+// first, then remaining plies forward, then from beginning. Then d20, d25.
+const EVALBOX = "http://192.168.50.4:8124";
+let evalTargetKey = null;  // "tag#gi" of the game being eval'd
+
+async function odEval(fen, depth) {
+  try {
+    const r = await fetch(`${EVALBOX}/eval`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({fen, depth})
+    });
+    const j = await r.json();
+    return j.cp;
+  } catch(e) { return null; }
+}
+
+function evalOrder(g, startPly) {
+  // selected ply first, then forward, then from beginning
+  const n = g.fens.length;
+  const out = [];
+  for (let i = startPly; i < n; i++) out.push(i);
+  for (let i = 0; i < startPly; i++) out.push(i);
+  return out;
+}
+
+async function sweepGame(m, gi, startPly) {
+  const key = keyOf(m, gi);
+  evalTargetKey = key;
+  const fens = m.games[gi].fens;
+  for (const d of [12, 20, 25]) {
+    const ek = "evals_d" + d;
+    // re-resolve the game from DATA each iteration — the poll replaces objects
+    const resolve = () => {
+      for (const mm of DATA) for (let j = 0; j < mm.games.length; j++)
+        if (keyOf(mm, j) === key) return mm.games[j];
+      return null;
+    };
+    let g = resolve();
+    if (!g) { evalTargetKey = null; return; }
+    const arr = g[ek] = g[ek] || [];
+    while (arr.length < fens.length) arr.push(undefined);
+    for (let i = startPly; i < fens.length; i++) {
+      if (evalTargetKey !== key) return;
+      if (arr[i] !== undefined && arr[i] !== 0) continue;
+      const cp = await odEval(fens[i], d);
+      g = resolve();
+      if (!g) { evalTargetKey = null; return; }
+      const a2 = g[ek] = g[ek] || [];
+      while (a2.length < fens.length) a2.push(undefined);
+      if (cp !== null && cp !== undefined && (a2[i] === undefined || a2[i] === 0)) {
+        a2[i] = cp;
+        renderAll();
+      }
+    }
+    for (let i = 0; i < startPly; i++) {
+      if (evalTargetKey !== key) return;
+      if (arr[i] !== undefined && arr[i] !== 0) continue;
+      const cp = await odEval(fens[i], d);
+      g = resolve();
+      if (!g) { evalTargetKey = null; return; }
+      const a2 = g[ek] = g[ek] || [];
+      while (a2.length < fens.length) a2.push(undefined);
+      if (cp !== null && cp !== undefined && (a2[i] === undefined || a2[i] === 0)) {
+        a2[i] = cp;
+        renderAll();
+      }
+    }
+  }
+  evalTargetKey = null;
+}
+
+// chart: click = jump, drag = zoom to range, double-click = reset
+let dragStart = null;
+$("chart").addEventListener("mousedown", e=>{ dragStart = e.clientX; });
+$("chart").addEventListener("mouseup", e=>{
+  if (dragStart == null || !sel) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  const series = DEPTHS.map(d=>sel.g["evals_d"+d]).filter(a=>Array.isArray(a)&&a.length);
+  if (!series.length){ dragStart=null; return; }
+  const n = Math.max(...series.map(a=>a.length));
+  const L=34, W=r.width, frac=x=>Math.max(0,Math.min(1,(x-r.left-L)/(W-34-6)));
+  const a = Math.round(frac(dragStart)*(n-1)), b = Math.round(frac(e.clientX)*(n-1));
+  dragStart = null;
+  if (Math.abs(b-a) >= 4){
+    chartWin = [Math.min(a,b), Math.max(a,b)];
+    ply = chartWin[0];
+    userNav = true; $("followcb").checked=false;
+    renderAll();
+  } else {
+    // treat as click: jump
+    const i = Math.round(frac(e.clientX)*(n-1));
+    ply = i; userNav = true; $("followcb").checked=false; renderAll();
+  }
+});
+$("chart").addEventListener("mouseleave", ()=>{ dragStart = null; });
+$("chart").addEventListener("dblclick", ()=>{ chartWin = null; renderAll(); });
+
+// self-reload: pick up page updates without user action
+let pageETag = null;
+async function checkPageUpdate(){
+  try {
+    const r = await fetch("/", {method:"HEAD", cache:"no-store"});
+    const lm = r.headers.get("Last-Modified");
+    if (lm){
+      if (pageETag === null) pageETag = lm;
+      else if (pageETag !== lm) location.reload();
+    }
+  } catch(e) {}
+}
+
+async function poll(){
+  try {
+    const r = await fetch("/games.json", {cache:"no-store"});
+    const j = await r.json();
+    const wasEmpty = DATA.length===0;
+    const fp = JSON.stringify(j);
+    const changed = fp !== poll.lastFp;
+    poll.lastFp = fp;
+    DATA = j;
+    if (!selKey || wasEmpty){
+      restoreSel();
+      if (!sel){ const k = pickDefault(); if (k){ selKey = k; findSel(); ply = sel && sel.g.open ? sel.g.fens.length-1 : 0; } }
+      saveSel();
+    } else {
+      findSel();
+      if (sel && sel.g.open && $("followcb").checked && !userNav){
+        ply = sel.g.fens.length-1;
+      }
+    }
+    if (changed || wasEmpty)
+      renderAll();
+    $("status").textContent = "updated " + new Date().toLocaleTimeString();
+    // foreground: report the on-screen game so its evals are computed first
+    if (sel)
+      fetch("/focus", {method:"POST", body: JSON.stringify({tag: sel.m.tag, gi: sel.gi, open: !!sel.g.open})}).catch(()=>{});
+    checkPageUpdate();
+  } catch(e) { $("status").textContent = "poll failed: " + e.message; }
+}
+
+$("first").onclick=()=>{ ply=0; userNav=true; $("followcb").checked=false; renderAll(); };
+$("prev").onclick =()=>{ if(ply>0){ply--; userNav=true; $("followcb").checked=false; renderAll();} };
+$("next").onclick =()=>{ if(sel&&ply<sel.g.fens.length-1){ply++; userNav=true; $("followcb").checked=false; renderAll();} };
+$("last").onclick =()=>{ if(sel){ply=sel.g.fens.length-1; userNav=true; $("followcb").checked=false; renderAll();} };
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowLeft") $("prev").click();
+  if(e.key==="ArrowRight") $("next").click();
+});
+
+poll();
+setInterval(poll, 12000);
+</script>
+</body>
+</html>

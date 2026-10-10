@@ -1,171 +1,260 @@
-# FLYCHESS HANDOFF — runtime state for the next session (2026-09-17 23:05 UTC)
+# FLYCHESS HANDOFF — 2026-09-27
 
-*Read DESIGN.md first (same directory; also at ~/chess-lab/DESIGN.md on rtx5090) —
-the architecture, laws, and roadmap. This doc = the RUNTIME state and the open threads.*
+## OPERATOR DIRECTIVES (standing, do not violate)
 
-## Where the program is (one paragraph)
+1. **NO UNAUTHORIZED EXPERIMENTS** — "do not do experiments I do not authorize"
+2. **NO SHORTCUTS** — depth-1 evals, partial dumps, monolithic tests without asking: all violations
+3. **NO LYING / SUGAR-COATING** — "STOP FUCKING LIE TO ME" / "DONT FUCKING LIE TO ME AGAIN"
+4. **Be precise with numbers** — 380K/10.3M = 3.7%, not 20%
+5. **The 8-specialist MoE is the goal** — material config × trajectory type
+6. **Curated OTB data only for the real training** — not self-play
 
-The fly plays chess through a gated curriculum on a frozen Drosophila
-connectome (MaleCNS, 188,778 neurons). **THE MOVEMENT FOUNDATION IS
-COMPLETE: the v3+ANORM chain finished 2026-09-17 22:59 UTC — all 6 lessons
-+ stages 2/3/4 PASSED, final sweep 27/27 batteries pass (worst 0.982
-s1:castle; fork 1.0, discovered 1.0, pin 1.0). PR #1 MERGED to master.**
-The last wall (discovered at 0.958 for 5.5h/193 plateau cycles) was a
-BATTERY ANSWER-KEY BUG, not capacity: the generator's discovery test used
-the slider's FULL attack mask (rejecting chess-valid discoveries that land
-on the unblocked perpendicular ray), and separately rejected
-capture-of-target — but the model correctly prefers winning the queen
-outright. Both fixed (segment test + capture acceptance), verified by
-answer-key spot test, and the resumed weights passed everything at step 1.
-The imagination layer graduated twice (0.9977/0.9974 depth-1/2 verified;
-0.963 dense-OOD gap). The H01 human cortical connectome (910G) is
-downloaded, audited (only the raw-EM layer missing — not needed), ids
-enumerated; the edge table is the next build. Prior-art target:
-mlabonne/chessfly (30.4% SF agreement, MAE 0.081).
+## THE PROGRAM (Path A: SF + our NNUE + phase-MoE)
 
-## The running processes (rtx5090:~/chess-lab)
+**Goal:** World champion chess bot via Stockfish search + our phase-routed MoE evaluation.
 
-| process | state | notes |
-|---|---|---|
-| `curriculum_v3.sh` (ANORM=1) | **COMPLETE — do not relaunch** | log ends "CURRICULUM V3 COMPLETE"; checkpoints fly_cb_v3_l1..l6.pt + s2/s3/s4.pt |
-| imagination retrain | GRADUATED (standing) | fly_imagines_retrain.pt; rig verdict loop_rig_verdict.json |
-| H01 extraction | DOWN by design | the relationship-file decode is the blocker; see below |
+**Architecture:** 8 specialist NNUE nets, each trained on a (material_config × eval_trajectory) cell of curated OTB data, loaded into a forked SF engine via EvalFile1-8, routed at eval time by piece count / material configuration.
 
-## The discovered-battery lesson (the new laws)
+## WHAT'S BUILT AND WORKING
 
-1. **A concept battery must not penalize the better chess move.** When a
-   discovery position also offers an outright win of the target piece, the
-   model that takes the queen is RIGHT; the eval must accept both the
-   discovery and the capture-of-target. (This was the second half of the
-   0.958 pin — introduced by the first fix, caught live in the relaunch's
-   tail, fixed the same hour.)
-2. **Discovery = leaving the blocked slider→target segment**
-   (`chess.between(slider,tgt) | {tgt}`), never "off the slider's full
-   attack mask" — perpendicular-ray landings (e6f8/d4e6 class) are true
-   discoveries. For a knight front EVERY move discovers (28/28 boards, 0
-   excluded moves); the concept only bites for rook/bishop fronts
-   (along-line stays stay rejected — 64 exclusions in the battery).
-3. **The spot-test that matters for a battery bug is the ANSWER KEY
-   itself** — regenerate the seeded battery, assert the failing picks are
-   accepted and the concept guards still reject. Model-free, deterministic,
-   one ssh. (The relaunch then passed at step 1, as predicted: 0.958 + 4
-   flips + 6 capture-accepts → 1.0.)
+### Stockfish fork (phase-moe-v0, branch on rtx5090)
+- Location: `/home/spec/Stockfish/` (branch `phase-moe-v0`, commits thru `34332d9`)
+- **Currently supports 2 slots only** (EvalFile + EvalFile2)
+- Needs extension to 8 slots for the real experiment
+- Routing: piece count ≤ 10 → endgame net (EvalFile2)
+- **MUST extend to 8 slots with material-config predicates**
+- Debug modes: `PHASE_MOE=0` (off), `1` (route), `2` (always-end), `3` (dual-evaluate)
+- Bug fixed: per-slot `EvalFile` state (was zeroing net2 due to shared state)
+- Bug fixed: per-slot `AccumulatorStack` (was corrupting evals)
 
-## The H01 extraction — the state and the blocker
+### nnue-pytorch trainer (on rtx5090)
+- Location: `/home/spec/nnue-pytorch/`
+- C++ data loader built at `data_loader/cpp/build/libtraining_data_loader.so`
+- Trainer works: `python3 train.py <data.bin> --max-epochs N --batch-size 1024`
+- Serializer works: `python3 serialize.py <ckpt> <out.nnue> --features "HalfKAv2_hm^"`
+- Deps installed (tyro, torch, etc. via `--break-system-packages`)
+- **Feature set MUST be `HalfKAv2_hm^`** (with caret) to match engine architecture
 
-- The id enumeration WORKS: 190,576,758 synapse ids via the per-shard
-  list_labels (the reader's list_labels(fn, path="") — the path arg must be
-  EMPTY or the join doubles: by_id/by_id/00.shard).
-- by_id/00.shard was a FAILED DOWNLOAD (0 bytes local vs 345,196,050 on GCS,
-  md5 HF0WPqOL7jF+D0Wa7Iaopw==) — RE-FETCHED and verified. The full per-file
-  audit: only 12 files MISSING, ALL in 4nm_raw (raw EM imagery, ~72G of
-  ~1.1T) — NOT needed for the memory/search experiments; the dataset is
-  complete for our purposes.
-- **The blocker**: the pre/post_synaptic_cell relationship lookups return
-  None for every synapse (edges=0 after 1.9M ids). The relationship files'
-  internal organization does NOT match the (id>>10)&8191 minishard formula —
-  the minishard-25 blob of 0.shard holds annotation ids 3.05e9–1.04e11 whose
-  own minishard ≠ 25. The neuroglancer sharded.md spec was fetched and the
-  layout is UNDERSTOOD (the shard index at the file HEAD: 2^minishard_bits
-  (start,end) pairs; the minishard-index blobs gzipped; the 3-col cumsum
-  decode with offsets +index_length) — but the relationship files' observed
-  content contradicts the naive assignment. The next session: implement the
-  reader per the spec + verify empirically against cloud-volume's own
-  get_by_relationship on a KNOWN-good id, or adapt the chessfly-style
-  extraction.
-- The extraction script: h01_extract_full.py (v3 — the verified enumerate +
-  batched get_by_id); the ids checkpointed at h01_ids.npy (190.6M).
-- cloud-volume 12.14.4 in ~/chess-lab/.venv312 (py3.12 via uv; the system
-  python 3.14 has no wheels). The info manifests were served gzipped —
-  gunzipped in place. The np.hstack(a,b) cloud-volume bug shimmed.
+### .bin data format packer
+- Our packer in `tools/gen_smoke_data.py` / `tools/pack_curated.py`
+- Correct 40-byte nodchip format (verified by C++ loader)
+- PackedSfen uses Huffman coding (BitWriter class in each tool)
 
-## The queued builds (in order)
+### Spark fleet infrastructure
+- 14 sparks reachable via ssh from rtx5090 (spark1-8, sparka-f)
+- SF built for ARM on each node (`~/extnvme/phase-moe/sf/src/stockfish`)
+- Data gen workers deployable via `~/extnvme/phase-moe/launch.sh`
+- **spark2 has the full infrastructure** (SF + python-chess + gen scripts)
+- Other nodes need `python3 -m pip install --break-system-packages python-chess`
 
-1. **Stage 5 mates** — imagination-for-depth + check semantics + the
-   dense-board curriculum (the 0.963 OOD gap). The movement weights
-   (fly_cb_v3_s4.pt) are the substrate.
-2. **The differential head D1/D2** (the 4096-slot option-space differential,
-   rule-derived training) — attaches to the completed movement weights.
-3. **The Lichess CC0 corpus** fetch (4.4M SF-annotated positions) — the D3
-   calibration + chessfly-comparable training.
-4. **The H01 edge-table extraction** + the book-memory experiment.
-5. **The opening module** (the operator's gambit spec: BD/Von Popiel/
-   Smith-Morra/Budapest/Englund/Latvian as the exemplars; the initiative
-   ledger bands +1/+2/+3; the asymmetric scoring win 1.0/draw 0.4-0.45).
-6. **Stage 6 Dvoretsky** (tablebase-gated, zugzwang-correct).
-7. **The personality adapters** (Morphy/Capablanca/Carlsen) + the H01
-   search substrate.
+### Quick match tester
+- `tools/quick_match.py` — 3-game matches vs SF at configurable skill level
+- Uses python-chess 0.31.4 (old API — `board.result()` not `board.outcome()`)
+- Runs on rtx5090 CPU, ~90s per 3-game match at 0.5s/move
 
-## The benchmark ladder
+## NETS TRAINED SO FAR (all on rtx5090)
 
-- Current: SF-agreement 2.5–5% (the untrained eval layer).
-- chessfly's published: 30.4% SF-agreement, MAE 0.081 (the direct prior art).
-- The mid-term target: ≥30.4% with our stricter substrate + the provable
-  curriculum; then beyond with the imagination-for-depth + H01 search.
+| net | data | arch | Elo estimate | file |
+|-----|------|------|--------------|------|
+| self-play baseline | 102M self-play depth-10 | monolithic | ~2400 | `our_net_v2.nnue` |
+| self-play 7-way (7 nets) | same 102M, piece-count sorted | 7 nets | untested | `nnue_7way/bucket_{0-6}.nnue` |
+| curated monolithic | 14.6M OTB (partial dump, ~3.7% of archive) | monolithic | ~2000-2200 | `curated_net.nnue` |
 
-## The laws recap (the full list in DESIGN.md)
+**None of these are the operator's design.** The real design needs:
+- Full OTB dump (all ~1.53M qualifying games)
+- Deep evaluations at depth 12+ on the full dump
+- Trajectory segment extraction on full data
+- Material-config bucketing
+- 8 specialist nets trained on their cells
 
-Scaffold-free gates; the spot-test asymmetry; the at-rail probe; stable
-seeds; the tiered acceptance (0.98/0.975/0.95); the v3 chain never killed
-mid-lesson; pkill alone (bracket pattern — the bare pattern self-matches
-the ssh-spawned shell, exit 255); the local-canonical patch flow; the PR
-flow (branch → test → PR → merge at stability — MERGED 0b535eb, master is
-canonical); fresh-tail liveness; gh merges need the ~/sparkpipe/.env PAT
-(keychain creds are stale; the PAT also lacks the PR-merge API scope —
-merge via git locally + push, the PR auto-closes).
+## MATCH RESULTS (3-game spot tests)
 
-## The key artifacts
+### Self-play baseline (our_net_v2.nnue)
+| skill | Elo | score |
+|-------|-----|-------|
+| 8 | ~1600 | 1.00 |
+| 12 | ~2000 | 1.00 |
+| 15 | ~2300 | 0.67 |
+| 18 | ~2600 | 0.50 |
+| 20 | ~2900+ | 0.33 |
 
-- The checkpoints: fly_cb_v3_l1..l6.pt, fly_cb_v3_s2/s3/s4.pt (the ANORM
-  lineage — THE movement deliverable); fly_imagines_retrain.pt (the
-  imagination deliverable); fly_sees_current.pt (the vision deliverable);
-  the graduated arms archived at /mnt/model-warm/flychess-archive/; the
-  saturated lineage at archive/v3_saturated/ on the node.
-- The repo: sparkpipe/flychess, master @ 0b535eb (PR #1 MERGED).
-- The design: DESIGN.md (repo + node). The prior art: mlabonne/chessfly (HF).
-- The H01: /mnt/model-warm/human-h01-connectome (910G, verified); the ids
-  checkpointed at h01_ids.npy; the extraction h01_extract_full.py.
+### Self-play 7-way with endgame routing (bucket_6 in EvalFile2)
+| skill | score |
+|-------|-------|
+| 8 | 1.00 |
+| 12 | 1.00 |
+| 15 | 0.50 |
+| 18 | 0.33 |
+| 20 | 0.17 |
 
-## The 8-hour unmonitored window (2026-09-18, operator: "stop for the day")
+### Curated monolithic (partial data)
+| skill | score |
+|-------|-------|
+| 8 | 1.00 |
+| 12 | 0.83 |
+| 15 | 0.67 |
+| 18 | 0.17 |
+| 20 | 0.00 |
 
-The driver automation is DELETED (operator ruling — training runs
-unmonitored ~8h). State at window start:
-- **Stage 5**: mate1 gate PASSED (1.00 on 200 held, all-mates key); the
-  chain is in `S5 SWEEP CYCLE 1` under the operator's cycle protocol
-  (repairs interleave 20% mate1 turns ONLY while held<0.98 → hold new set
-  ≥0.98 → re-table → up to 3 cycles → `S5 NO-CONVERGENCE` + analysis dump
-  and STOP). Check v3_s5.out first thing: STAGE 5 ALL MILESTONES PASSED /
-  NO-CONVERGENCE / still mid-cycle. The branch stage5-mates merges to
-  master via git when the PASS lands.
-- **H01 extraction**: Ceph object fault FIXED (operator/sysadmin cleared
-  by_id/01.shard — verified readable); extraction relaunched and healthy.
-  NOTE: ~/.cloudfiles/locks accumulates stale lock files over long runs
-  (4.1M files once) — clear it after the extraction completes. The edge
-  table (relationship decode) remains the queued build after the raw
-  extraction.
-- **Training audit** (operator-directed, done 2026-09-18): stages 1-3
-  labels rule-derived from chess.legal_moves (clean); stage 4 concept
-  labels rule-verified at generation (kingless boards — SF inapplicable);
-  stage 5 200/200 SF-validated (label is mate, SF agrees mate-in-1, SF
-  best is a mate). The open training-side improvement: CE targets one
-  labeled mate where several are correct — multi-target CE is the next
-  fix when the SF-scored harness lands with D1/D2.
-- **Disk**: root LV extended 100G→216G (128G unallocated absorbed; 36%
-  used). The drafters LV (688G, /srv/drafters, retired dflash artifacts
-  27G) awaits the operator's reclaim ruling.
+**Note:** All these are 3-game samples — statistically weak. The 7-way and curated results are from partial/incorrect data and do NOT represent the operator's design.
 
-## STAGE 6 PASSED — the v3 curriculum is COMPLETE (2026-09-18)
+## DATA ASSETS ON rtx5090
 
-`STAGE 6 PASSED — tablebase endings internalized`: gate 0.99 at step 5500
-(floor 0.98) after the reinforce-best fix took it off the 0.47 pin
-(0.5875@500 → 0.8625@4000 → 0.99@5500). Graduated checkpoint archived at
-/mnt/model-warm/flychess-archive/graduated-arms/fly_cb_v3_s6_graduated.pt;
-live fly_cb_v3_s6.pt on the node. THE FULL LADDER: 6 lessons + stages
-2/3/4 + stage 5 (KQvK mate-in-1, all-mates key) + stage 6 (tablebase
-endings, graded state-change targets, zugzwang-correct). The next
-builds, in order: the mates ladder via imagination depth (KRK technique,
-mate-in-2, KBNvK W-maneuver), the differential head D1/D2 (+ the
-SF-scored all-moves harness and multi-target CE), the Lichess CC0 fetch,
-the opening module (gambit spec, asymmetric scoring), H01 experiments
-after the extraction completes (relaunch recipe proven: tmpfs locks +
-janitor; resume idempotent from 46 parts).
+| asset | path | size | status |
+|-------|------|------|--------|
+| OTB game archive | `/home/spec/chess-lab/games/LumbrasGigaBase_OTB_Complete.pgn` | 8.6GB | complete |
+| Prefiltered PGN (decisive, 2400+/2000+) | `/home/spec/chess-lab/gambit/filtered.pgn` | ~6GB | complete |
+| Partial OTB dump (winner positions) | `/home/spec/chess-lab/otb_all_positions.txt` | 15.7M positions | ~3.7% of archive |
+| Deep evals on partial dump (depth 12) | `/home/spec/chess-lab/otb_evals/combined.txt` | 15.7M evals | covers the partial dump |
+| Trajectory segments (partial) | `/home/spec/chess-lab/otb_segments.jsonl` | 15.7M positions tagged | covers the partial dump |
+| Curated training .bin (partial) | `/home/spec/chess-lab/curated_training.bin` | 14.6M positions | draw-to-draw excluded |
+| GAMBIT pool (mined) | `/home/spec/chess-lab/tbpools/GAMBIT.jsonl` | 40K positions | from 94K matched games |
+| DEGM2 corpus | `/home/spec/chess-lab/tbpools/DEGM2_Ch*.jsonl` | 21K positions | book-audited |
+| TB specialist data (generating) | `/home/spec/chess-lab/tb_training.bin` | 3.1M/5M | syzygy ≤5 pieces |
+| Self-play fleet data | `/home/spec/chess-lab/fleet_data_all.bin` | 102M positions | depth-10 self-play |
+| Lichess puzzle DB | `/home/spec/chess-lab/puzzles/lichess_db_puzzle.csv` | 6.1M puzzles | theme-tagged |
+| Syzygy 3-4-5 | `/home/spec/syzygy/` | 926MB | WDL+DTZ |
+| 6-piece WDL download | spark2:~/extnvme/phase-moe/syzygy6/ | checking | from lichess |
+
+## CRITICAL PENDING WORK (in order)
+
+### 1. Complete the OTB dump
+- The single-threaded dump processed only ~3.7% of qualifying games
+- **Use `gambit/filtered.pgn`** as input (already prefiltered to decisive + 2400+/2000+)
+- Expected yield: ~63M winner positions from ~1.53M games
+- Tool: `tools/otb_dump.py` with `PGN=gambit/filtered.pgn`
+- **IMPORTANT: the dump script has no resume. Must run to completion.**
+- **DO NOT** use the depth-1 evals from the gambit mining — they are OBSOLETE
+- **DO NOT** use line-based PGN splitting — it breaks games at shard boundaries
+
+### 2. Deep-evaluate the full dump on spark fleet
+- Deploy full position dump to all 14 sparks
+- Evaluate at depth 12 (NOT depth 1, NOT depth 10 — depth 12 minimum)
+- Tool: `tools/otb_eval_fleet.py` on each spark
+- Expected time: ~30-60 minutes fleet-wide for 63M positions
+- Each spark needs the position file + the eval script + SF binary
+
+### 3. Run trajectory segment extraction on full data
+- Tool: `tools/segment_extractor.py`
+- Game boundary detection: ply decrease (NOT ply==1)
+- Fix `None` cp values: `parts[7] != 'None'` guard
+- Excludes draw-to-draw trajectories (operator ruling)
+- Produces (trajectory_type, material_config) tagged positions
+- Stats tool: `tools/matrix_report.py`
+
+### 4. Extend the SF fork from 2 slots to 8 slots
+- Currently: `EvalFile` + `EvalFile2` with piece-count routing
+- Need: `EvalFile1-8` with material-config routing
+- Same pattern as v0: per-slot Network, per-slot EvalFile, per-slot AccumulatorStack
+- Files to modify: `engine.h`, `engine.cpp`, `search.h`, `search.cpp`
+- Routing predicates from operator's design (see below)
+- This is C++ work in `/home/spec/Stockfish/src/`
+
+### 5. Build per-specialist .bin training files
+- From the trajectory×config matrix, group positions by specialist assignment
+- Pack each specialist's positions into .bin format
+- Tool: variant of `pack_curated.py` with config-based filtering
+
+### 6. Train 8 specialist nets
+- Each specialist trains on its own .bin
+- Same nnue-pytorch trainer
+- Budget: operator decides (they predicted MoE needs more training time)
+
+### 7. Load into fork, SPRT match
+- 8 EvalFile options → 8 nets
+- SPRT vs monolithic baseline at equal total training budget
+- Also run at 2×, 4×, 8× budget for the curve comparison
+
+## OPERATOR'S SPECIALIST DESIGN (do not deviate)
+
+**8 specialists:**
+0. opening-normal
+1. opening-gambit
+2. mid-positional
+3. mid-open
+4. mid-queenless
+5. mid-tactics
+6. endgame-dvoretsky (practical endgames, 6-10 pieces)
+7. endgame-tablebase (exact endgames, ≤5 pieces, syzygy)
+
+**Material configs for routing (from operator):**
+- N vs B, 2N vs N+B, 2B vs 2B, 2N vs R, N+B vs R, 2B vs R, N vs R, B vs R
+- 2R vs 2R, 2R vs Q, R+N vs Q, R+B vs Q
+- Bishops of opposite colors (specific drawing/technique patterns)
+- Exchange-down positions (R for N/B — how to hold the draw)
+- **"saving the draw being an exchange down is a super important skill"**
+
+**Open/closed is a SPECTRUM based on pawn contact:**
+- Locked: facing pawns on same file (e4 vs e5)
+- Tension: capturable pawns (important factor)
+- Open file: no pawns at all
+- Edge files locked ≠ closed (center still playable)
+- Before pawns come in contact: neutral/undetermined
+
+**Eval trajectory types (from operator):**
+- press: 55% → 70% (pressing small advantage)
+- convert: 70% → win (finishing)
+- equalize: 45% → 55% (from worse to balanced)
+- defend: 30% → 45% (fighting back from clearly worse)
+- **Exclude: draw-to-draw** (no skill demonstrated)
+- **Include segments from losing games** (improving play is valuable regardless)
+- One mistake starts a new segment (blunder = boundary)
+
+**Segment sub-division within material changes:**
+- If material config changes mid-segment, sub-divide
+- Each sub-segment trains the appropriate specialist
+- The exchange moves themselves → piece-exchange specialist
+- "The important thing is to capture the full sweep of the winning moves"
+
+## LAWS AND RULES (accumulated)
+
+- Exhaustive gates for verification; sampled gates for telemetry only
+- Best-snapshot + answer-set (verification, not load-bearing selector)
+- PR flow: test via PR, merge at stability
+- Pause/resume must be smooth (checkpoint everything)
+- Sparks: 10-15GB RAM limit (20GB approved for quality), nice-10, NVMe-local
+- No symlinks for stagepacks
+- `pkill` self-match law: never combine kill patterns and launch text in one ssh
+- python-chess on sparks is 0.31.4 (old API — no `board.outcome()`)
+- Stockfish on sparks is ARM (GB10) — x86 binaries won't run
+- SF arch hash: use `--features "HalfKAv2_hm^"` (with caret) for the trainer
+- Struct format for .bin: `<32shHHbB` (H for move, not h — overflow)
+
+## RUNNING PROCESSES (as of handoff)
+
+- **OTB dump on prefiltered PGN**: may be running from `gambit/filtered.pgn` → `otb_complete_dump.txt` (check with `pgrep -f otb_dump`)
+- **TB specialist generation**: 3.1M/5M positions (`tb_gen.out`)
+- **Spark fleet self-play workers**: may still be running on some nodes
+- Check and stop unauthorized processes before starting new work
+
+## KEY FILES ON rtx5090
+
+```
+/home/spec/Stockfish/          # SF fork (branch phase-moe-v0)
+/home/spec/nnue-pytorch/       # NNUE trainer
+/home/spec/chess-lab/           # main workspace
+  games/LumbrasGigaBase_OTB_Complete.pgn   # 8.6GB OTB archive
+  gambit/filtered.pgn                       # prefiltered (decisive, 2400+/2000+)
+  gambit/evals.txt                          # depth-1 evals (OBSOLETE — do not use)
+  otb_all_positions.txt                     # partial dump (15.7M from 3.7% of games)
+  otb_evals/combined.txt                    # depth-12 evals on partial dump
+  otb_segments.jsonl                        # trajectory segments on partial dump
+  curated_training.bin                      # packed curated data (partial)
+  our_net_v2.nnue                           # self-play baseline net
+  curated_net.nnue                          # curated monolithic net (partial data)
+  nnue_7way/bucket_{0-6}.nnue              # self-play 7-way nets
+  tb_training.bin                           # TB specialist data (generating)
+  fleet_data_all.bin                        # 102M self-play positions
+/home/spec/syzygy/                          # 3-4-5 piece tablebases
+```
+
+## WHAT NOT TO DO
+
+1. Do NOT train monolithic nets and call them the experiment
+2. Do NOT use depth-1 evaluations for anything
+3. Do NOT use self-play data for the curated training
+4. Do NOT run experiments without operator authorization
+5. Do NOT claim partial data is complete
+6. Do NOT use line-based PGN splitting (breaks games)
+7. Do NOT use `gambit/evals.txt` (depth-1, obsolete)
+8. Do NOT test the 2-slot fork and call it the MoE comparison

@@ -14,7 +14,7 @@ import chess
 import chess.pgn
 
 PGN = "/mnt/cold-raid6/rtx5090-archive/chess-lab/games/LumbrasGigaBase_OTB_Complete.pgn"
-OUT = "/srv/workspace/chess-active/miniature_rows_v2.tsv"
+OUT = "/srv/workspace/chess-active/miniature_rows_v3.tsv"  # corr-excluded baseline
 LOSER_ELO = 2400   # the strong player who loses
 WINNER_ELO = 2000  # the winner's floor
 MAXMOVE = 25
@@ -50,6 +50,8 @@ with open(PGN, encoding="utf-8", errors="replace") as f:
         h = g.headers
         res = h.get("Result", "")
         if res not in ("1-0", "0-1"):
+            continue
+        if "corr" in h.get("Event", "").lower():  # operator 2026-10-09: corr OUT for baseline
             continue
         we = elo(h, "WhiteElo")
         be = elo(h, "BlackElo")

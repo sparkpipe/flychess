@@ -118,14 +118,23 @@ def main():
         for g in games:
             n = len(g["fens"])
             for d in DEPTHS:
-                ek, pk = f"evals_d{d}", f"pv_d{d}"
+                ek = f"evals_d{d}"
                 cur = g.get(ek) or []
-                if len(cur) >= n:
-                    continue
+                # find the next ply to fill: first gap OR first suspect zero
+                # (a 0 in the middle of a game is almost always a failed eval
+                # that got written as a placeholder — re-check it)
                 i = len(cur)
+                for j, v in enumerate(cur):
+                    if j > 2 and v == 0:
+                        i = j
+                        break
+                if i >= n:
+                    continue
                 res = eng.top5(g["fens"][i], d)
-                ev = res[0][0] if res else 0
-                pv = " ;; ".join(f"{v}|{p}" for v, p in res) if res else ""
+                if not res:
+                    continue  # never write a fake 0 — retry this ply next pass
+                ev = res[0][0]
+                pv = " ;; ".join(f"{v}|{p}" for v, p in res)
 
                 def update_by_fens(doc, _g=g, _ek=ek, _i=i, _ev=ev, _pv=pv):
                     did = False

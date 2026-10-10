@@ -13,7 +13,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DB = "/srv/workspace/chess-active/store/games.db"
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"  # spark access
 PORT = 8123
 LEASE_S = 600
 N_MAX = 20000
@@ -34,7 +34,12 @@ def init():
         engine text, depth integer, node text, state text, allocated_at real, deadline real);
     create index if not exists idx_alloc_open on allocations(state, deadline);
     create table if not exists meta(key text primary key, value integer);
+    create table if not exists deepest(fen text primary key, engine text,
+        depth integer, cp integer, by_node text, labeled_at text);
     """)
+    # covering index: depth-keyed exports/completeness never table-scan
+    con.execute("create index if not exists idx_labels_engdep"
+                " on labels(engine, depth, fen, cp)")
     con.commit()
     # one-time cursor init (can take a minute on first boot; done before serving)
     get_cursor("sf17", 12)
@@ -98,13 +103,25 @@ def allocate(node, engine, depth, n):
 def submit(node, results, engine="sf17", depth=12):
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
     with lock:
+        rows = []
+        deep = []
         for r in results:
-            # write the label directly — a late result is still a valid result,
-            # even if its lease was reclaimed mid-flight
-            con.execute(
-                "insert or replace into labels(fen, engine, depth, cp, by_node, labeled_at)"
-                " values (?,?,?,?,?,?)",
-                (r["fen"], engine, depth, int(r["cp"]), node, ts))
+            # v2 workers record a DEPTH TRAJECTORY (13..D) per position, so the
+            # row's own depth wins when present
+            d = int(r.get("depth", depth))
+            rows.append((r["fen"], engine, d, int(r["cp"]), node, ts))
+            deep.append((r["fen"], engine, d, int(r["cp"]), node, ts))
+        con.executemany(
+            "insert or replace into labels(fen, engine, depth, cp, by_node, labeled_at)"
+            " values (?,?,?,?,?,?)", rows)
+        # deepest-known eval per fen (for variable-depth training): upsert only
+        # when this row's depth exceeds what is stored
+        con.executemany(
+            "insert into deepest(fen, engine, depth, cp, by_node, labeled_at)"
+            " values (?,?,?,?,?,?) on conflict(fen) do update set"
+            " engine=excluded.engine, depth=excluded.depth, cp=excluded.cp,"
+            " by_node=excluded.by_node, labeled_at=excluded.labeled_at"
+            " where excluded.depth > deepest.depth", deep)
         con.executemany(
             "update allocations set state='done' where fen=? and state='open'"
             " and engine=? and depth=?",
@@ -116,13 +133,15 @@ def submit(node, results, engine="sf17", depth=12):
 def stats():
     with lock:
         pos = con.execute("select count(*) from positions").fetchone()[0]
+        dep = con.execute("select count(*) from deepest").fetchone()[0]
         labs = con.execute(
-            "select engine, depth, count(*) from labels group by engine, depth").fetchall()
+            "select engine, depth, count(*) from labels"
+            " group by engine, depth").fetchall()
         open_a = con.execute(
             "select count(*) from allocations where state='open'").fetchone()[0]
         curs = dict(con.execute("select key, value from meta").fetchall())
-    return {"positions": pos, "labels": [{"engine": e, "depth": d, "n": n}
-                                         for e, d, n in labs],
+    return {"positions": pos, "deepest": dep,
+            "labels": [{"engine": e, "depth": d, "n": n} for e, d, n in labs],
             "open_leases": open_a, "cursors": curs}
 
 

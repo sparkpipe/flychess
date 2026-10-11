@@ -38,8 +38,8 @@
   #nav button:hover { border-color:var(--acc); }
   #nav .plyinfo { color:var(--dim); font-variant-numeric:tabular-nums; margin:0 8px; min-width:70px; text-align:center; }
   #nav #analyze { padding:4px 10px; opacity:.8; }
-  #pvline { font:10px/1.5 "SF Mono",Menlo,monospace; color:var(--dim); min-height:16px;
-             max-width:min(56vh,480px); white-space:nowrap; overflow:hidden; }
+  #pvline { max-height:300px; overflow-y:auto; font:10px/1.5 "SF Mono",Menlo,monospace; color:var(--dim); min-height:16px;
+             max-width:min(56vh,480px); white-space:nowrap; overflow-x:hidden; }
   #pvline b { color:#b08d4a; font-weight:500; font-size:10px; }
   #rightcol { flex:1; display:flex; flex-direction:column; gap:10px; min-width:280px;
               position:relative; z-index:2; background:var(--bg); }
@@ -161,8 +161,7 @@ function renderSide(){
         prevOpen = openLabel;
       } else prevOpen = null;
       if (keyOf(m,gi)===selKey) b.classList.add("sel");
-      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll();
-      sweepGame(m, gi, ply); };
+      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll(); };
       md.appendChild(b);
     });
     root.appendChild(md);
@@ -390,171 +389,96 @@ $("analyze").onclick = ()=>{
 };
 
 const GLYPH_PV = {N:"♘",B:"♗",R:"♖",Q:"♕",K:"♔"};
+function pvRow(g, i, cp, moves, color){
+  const row = document.createElement("div");
+  const sc = Math.abs(cp) > 9000
+    ? (cp>0?"M"+(Math.abs(cp)-10000):"-M"+(Math.abs(cp)-10000))
+    : ((cp/100)>=0?"+":"")+(cp/100).toFixed(2);
+  const s1 = document.createElement("span");
+  s1.style.cssText = "display:inline-block;min-width:52px;color:"+color+";font-variant-numeric:tabular-nums;font-weight:600";
+  s1.textContent = sc;
+  row.appendChild(s1);
+  row.appendChild(document.createTextNode("  "));
+  let white = g.fens[i].split(" ")[1] === "w";
+  let moveNo = parseInt(g.fens[i].split(" ")[5], 10) || 1;
+  let firstTok = true;
+  for (const tok of moves.split(" ")){
+    if (white || firstTok){
+      const nspan = document.createElement("span");
+      nspan.style.cssText = "opacity:.6;margin-right:1px";
+      nspan.textContent = white ? (moveNo + ".") : (moveNo + "\u2026");
+      row.appendChild(nspan);
+    }
+    firstTok = false;
+    row.appendChild(document.createTextNode(fmtMove(tok) + " "));
+    if (white) white = false; else { white = true; moveNo += 1; }
+  }
+  return row;
+}
+const DCOL_UI = {12:"#8a919c", 20:"#5aa9e6", 25:"#e0b05a"};
+let top5Key = null, top5Id = 0;
+
+// live top-5 for the CURRENT position only: d12 first, then d20, then d25,
+// each block colored by its chart color. Nothing stored; refetch on ply change.
 function renderPv(){
   const el = $("pvline");
-  el.textContent = "";
-  if (!sel) return;
+  if (!sel){ el.textContent = ""; return; }
   const g = sel.g;
   const i = Math.min(ply, g.fens.length - 1);
   if (!analysisOn){
+    el.textContent = "";
     const b = document.createElement("b");
     b.textContent = "analysis paused";
     el.appendChild(b);
     return;
   }
-  const have = DEPTHS.filter(d => Array.isArray(g["pv_d"+d])).map(d => "d"+d);
-  for (const d of [25,20,12]){
-    const a = g["evals_d"+d], p = g["pv_d"+d];
-    const hasLines = Array.isArray(p) && p[i] && String(p[i]).includes("|");
-    if (!hasLines)
-      continue;
-    const raw = p[i];
-    const b = document.createElement("b");
-    b.textContent = `SF d${d} top-5`;
-    el.appendChild(b);
-    if (raw && raw.includes("|")){
-      for (const line of raw.split(" ;; ").slice(0,5)){
-        const [cp, moves] = line.split("|");
-        const v = parseInt(cp, 10);
-        const sc = Math.abs(v) > 9000
-          ? (v>0?"M"+(Math.abs(v)-10000):"-M"+(Math.abs(v)-10000))
-          : ((v/100)>=0?"+":"")+(v/100).toFixed(2);
-        const row = document.createElement("div");
-        const s1 = document.createElement("span");
-        s1.style.cssText = "display:inline-block;min-width:52px;color:var(--gold);font-variant-numeric:tabular-nums";
-        s1.textContent = sc;
-        row.appendChild(s1);
-        row.appendChild(document.createTextNode(" "));
-        // chess-site style: move number + piece glyph + SAN
-        let white = g.fens[i].split(" ")[1] === "w";
-        let moveNo = parseInt(g.fens[i].split(" ")[5], 10) || 1;
-        let firstTok = true;
-        for (const tok of moves.split(" ")){
-          // number only before white's move, or before black's first move of the line
-          if (white || firstTok){
-            const numTag = white ? (moveNo + ".") : (moveNo + "…");
-            const nspan = document.createElement("span");
-            nspan.style.cssText = "opacity:.6;margin-right:1px";
-            nspan.textContent = numTag;
-            row.appendChild(nspan);
-          }
-          firstTok = false;
-          const gl = GLYPH_PV[tok[0]];
-          if (gl && !tok.startsWith("O-O")){
-            const pc = document.createElement("span");
-            pc.className = white ? "wp" : "bp";
-            pc.style.cssText = "font-size:13px;line-height:1";
-            pc.textContent = gl;
-            row.appendChild(pc);
-            row.appendChild(document.createTextNode(tok.slice(1) + " "));
-          } else {
-            row.appendChild(document.createTextNode(tok + " "));
-          }
-          if (white) white = false; else { white = true; moveNo += 1; }
+  const key = selKey + "#" + i;
+  if (top5Key === key) return;          // already rendered or running
+  top5Key = key;
+  const myId = ++top5Id;
+  el.textContent = "computing top-5 for this position\u2026";
+  (async () => {
+    let cleared = false;
+    for (const d of [12, 20, 25]){
+      if (top5Id !== myId) return;      // user moved to another ply
+      try {
+        const r = await fetch("/top5?fen=" + encodeURIComponent(g.fens[i]) + "&depth=" + d);
+        const j = await r.json();
+        if (top5Id !== myId) return;
+        el.textContent = "";   // deeper depth replaces shallower display
+        const b = document.createElement("b");
+        b.style.cssText = "color:" + DCOL_UI[d] + ";display:block;margin-top:3px";
+        b.textContent = "SF d" + d + " top-5";
+        el.appendChild(b);
+        for (const [cp, moves] of (j.lines || [])){
+          el.appendChild(pvRow(g, i, cp, moves, DCOL_UI[d]));
         }
-        el.appendChild(row);
-      }
-    } else {
-      el.appendChild(document.createTextNode(" (lines computing…)"));
+        try {
+          const r2 = await fetch("/top5g?fen=" + encodeURIComponent(g.fens[i]) + "&depth=" + d);
+          const j2 = await r2.json();
+          if (top5Id !== myId) return;
+          const b2 = document.createElement("b");
+          b2.style.cssText = "color:#7bd88f;display:block;margin-top:4px";
+          b2.textContent = "general1 d" + d + " top-3";
+          el.appendChild(b2);
+          for (const [cp, moves] of (j2.lines || [])){
+            el.appendChild(pvRow(g, i, cp, moves, "#7bd88f"));
+          }
+        } catch(e2) {}
+      } catch(e) {}
     }
-    return;
-  }
-  const b0 = document.createElement("b");
-  b0.textContent = have.length ? `SF17 top-5 (${have.join("/")} done — deeper pending)` : "analysis pending (SF17 sweep running)";
-  el.appendChild(b0);
+  })();
 }
 
 function renderAll(){
-  findSel();
-  if (sel && evalTargetKey === null && selKey !== null) {
-    const m = sel.m, gi = sel.gi;
-    const anyMissing = [12,20,25].some(d => {
-      const a = sel.g["evals_d"+d];
-      return !a || a.some(v => v == null || v === 0);
-    });
-    if (anyMissing) sweepGame(m, gi, ply);
-  }  // resolve sel from selKey before rendering — click must take effect immediately
+  findSel();  // evals are baked server-side (d12_bake.py) — no on-demand fetching here
   for (const f of [renderSide, renderHdr, renderBoard, renderMoves, renderChart, renderPv]){
     try { f(); } catch(e){ console.error(f.name, e); }
   }
 }
 
 
-// On-demand evals: when a game is selected, evaluate d12 for the selected ply
-// first, then remaining plies forward, then from beginning. Then d20, d25.
-const EVALBOX = "http://127.0.0.1:8124";  // Mac Studio local SF17 eval service
-let evalTargetKey = null;  // "tag#gi" of the game being eval'd
-
-async function odEval(fen, depth) {
-  try {
-    const r = await fetch(`${EVALBOX}/eval`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({fen, depth})
-    });
-    const j = await r.json();
-    return j.cp;
-  } catch(e) { return null; }
-}
-
-function evalOrder(g, startPly) {
-  // selected ply first, then forward, then from beginning
-  const n = g.fens.length;
-  const out = [];
-  for (let i = startPly; i < n; i++) out.push(i);
-  for (let i = 0; i < startPly; i++) out.push(i);
-  return out;
-}
-
-async function sweepGame(m, gi, startPly) {
-  const key = keyOf(m, gi);
-  evalTargetKey = key;
-  const fens = m.games[gi].fens;
-  for (const d of [12, 20, 25]) {
-    const ek = "evals_d" + d;
-    // re-resolve the game from DATA each iteration — the poll replaces objects
-    const resolve = () => {
-      for (const mm of DATA) for (let j = 0; j < mm.games.length; j++)
-        if (keyOf(mm, j) === key) return mm.games[j];
-      return null;
-    };
-    let g = resolve();
-    if (!g) { evalTargetKey = null; return; }
-    const arr = g[ek] = g[ek] || [];
-    while (arr.length < fens.length) arr.push(undefined);
-    for (let i = startPly; i < fens.length; i++) {
-      if (evalTargetKey !== key) return;
-      if (arr[i] != null && arr[i] !== 0) continue;
-      const cp = await odEval(fens[i], d);
-      g = resolve();
-      if (!g) { evalTargetKey = null; return; }
-      const a2 = g[ek] = g[ek] || [];
-      while (a2.length < fens.length) a2.push(undefined);
-      if (cp !== null && cp !== undefined && (a2[i] == null || a2[i] === 0)) {
-        a2[i] = cp;
-        arr = a2;   // skip-check must track the live array across poll swaps
-        renderAll();
-      }
-    }
-    for (let i = 0; i < startPly; i++) {
-      if (evalTargetKey !== key) return;
-      if (arr[i] != null && arr[i] !== 0) continue;
-      const cp = await odEval(fens[i], d);
-      g = resolve();
-      if (!g) { evalTargetKey = null; return; }
-      const a2 = g[ek] = g[ek] || [];
-      while (a2.length < fens.length) a2.push(undefined);
-      if (cp !== null && cp !== undefined && (a2[i] == null || a2[i] === 0)) {
-        a2[i] = cp;
-        arr = a2;   // skip-check must track the live array across poll swaps
-        renderAll();
-      }
-    }
-  }
-  evalTargetKey = null;
-}
-
-// chart: click = jump, drag = zoom to range, double-click = reset
+// // chart: click = jump, drag = zoom to range, double-click = reset
 let dragStart = null;
 $("chart").addEventListener("mousedown", e=>{ dragStart = e.clientX; });
 $("chart").addEventListener("mouseup", e=>{
@@ -593,51 +517,6 @@ async function checkPageUpdate(){
   } catch(e) {}
 }
 
-// eval arrays live only in the page: carry them across polls and reloads
-// (keyed by tag#gi) so the 12s refresh never discards computed evals.
-function evalStore(){
-  try { return JSON.parse(localStorage.getItem("flychess.evals") || "{}"); } catch(e){ return {}; }
-}
-function saveEvals(){
-  const st = evalStore();
-  for (const m of DATA) for (let i = 0; i < m.games.length; i++){
-    const g = m.games[i], key = keyOf(m, i), o = st[key] || {};
-    let touched = false;
-    for (const d of DEPTHS){
-      const a = g["evals_d"+d];
-      if (!Array.isArray(a)) continue;
-      const old = Array.isArray(o[d]) ? o[d] : [];
-      let wrote = false;
-      const out = old.slice();
-      for (let k = 0; k < a.length; k++){
-        const v = a[k];
-        if (v != null && v !== 0 && (out[k] == null || out[k] === 0)){ out[k] = v; wrote = true; }
-      }
-      if (wrote || a.length > old.length){ o[d] = out; touched = true; }
-    }
-    if (touched) st[key] = o;
-  }
-  try { localStorage.setItem("flychess.evals", JSON.stringify(st)); } catch(e){}
-}
-function mergeEvals(newData){
-  const st = evalStore();
-  for (const m of newData) for (let i = 0; i < m.games.length; i++){
-    const g = m.games[i], o = st[keyOf(m, i)];
-    if (!o) continue;
-    for (const d of DEPTHS){
-      const saved = o[d];
-      if (!Array.isArray(saved) || !saved.length) continue;
-      const cur = Array.isArray(g["evals_d"+d]) ? g["evals_d"+d] : [];
-      const out = cur.slice();
-      let used = false;
-      for (let k = 0; k < saved.length && k < g.fens.length; k++){
-        if (saved[k] != null && saved[k] !== 0 && (out[k] == null || out[k] === 0)){ out[k] = saved[k]; used = true; }
-      }
-      if (used) g["evals_d"+d] = out;
-    }
-  }
-}
-
 async function poll(){
   try {
     const r = await fetch("/games.json", {cache: "no-store"});
@@ -646,8 +525,6 @@ async function poll(){
     const fp = JSON.stringify(j);
     const changed = fp !== poll.lastFp;
     poll.lastFp = fp;
-    saveEvals();       // persist evals living on the OLD objects first...
-    mergeEvals(j);     // ...then carry them (store + server data) into the fresh JSON
     DATA = j;
     if (!selKey || wasEmpty){
       restoreSel();
@@ -679,7 +556,7 @@ document.addEventListener("keydown",e=>{
 });
 
 poll();
-setInterval(poll, 12000);
+setInterval(poll, 4000);
 </script>
 </body>
 </html>

@@ -1,0 +1,35 @@
+# DESIGN LAW — simplest version that has a chance of working
+
+Operator ruling, 2026-10-11: "I do not mind if you improve on my spec…
+ADDING new complexity is NOT an improvement. Making it more simple is the
+improvement. Start with the simplest version that has a chance of working,
+then iterate with incremental complexity. NEVER start with a battleship
+airrier design if an inflatable raft will do the job."
+
+## The laws
+
+1. **The spec is the complexity ceiling, not the floor.** A specified
+   design's size is the budget. Deliverables come back shorter or equal;
+   anything longer requires a ruling BEFORE it is written.
+2. **Raft first, measured.** Build and run the simplest version that has
+   a chance of working, with numbers, before any improvement exists.
+   Improvements are judged against that measured baseline.
+3. **Evidence-gated complexity.** A new layer may be added only for a
+   failure that has actually been observed, and the addition must name
+   that failure. Speculative failure modes do not qualify — and an
+   observed failure that idempotency already absorbs DISQUALIFIES the
+   layer (e.g., a dead worker whose positions the cursor wrap re-hands).
+4. **Subtract-first fixes.** When something breaks, the first candidate
+   fix is removing code. Patching within a wrong shape is not a fix.
+5. **Every PR answers "what did you NOT build?"** Name the simpler
+   version rejected and why it cannot work. No answer = design not found.
+
+## Why this is the safe direction, not the risky one
+
+Durability in this system comes from idempotent writes + retry — one-line
+properties. Bookkeeping for failure recovery (leases, queues, resume
+files) is not safety; it is a second system whose seams become the
+failure surface. The cursor protocol is kill-any-process-anytime safe
+with zero bookkeeping: see EVALUATION.md for the measured cost of
+believing otherwise (1,195 LOC and ~5 hours of debugging vs 304 LOC and
+15 minutes, at higher end-to-end throughput for the simple version).

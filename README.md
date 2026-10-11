@@ -21,3 +21,11 @@ Drosophila connectome (MaleCNS 188,778 neurons) learns chess.
 ## Tools
 - checklist.py — tournament-player gate (SF resistance, 100% bars)
 - ladder_match.sh — Elo ladder vs calibrated anchors + SF UCI_Elo rungs
+
+## dbnet — general labeling infrastructure
+
+`tools/dbnet/` — label any FEN corpus with any engine/depth into a shared
+DB via a fleet (cursor-protocol GET/POST sweep service, pooled on-demand
+evals, deploy + telemetry). Engine-agnostic; see tools/dbnet/README.md
+and tools/dbnet/EVALUATION.md (design post-mortem: three implementations
+compared on complexity, debugging time, and throughput).

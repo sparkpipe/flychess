@@ -212,8 +212,9 @@ function renderBoard(){
 }
 
 function renderHdr(){
-  if (!sel){ $("players").textContent="no games yet"; $("meta").textContent=""; return; }
+  if (!sel){ $("players").textContent="no games yet"; $("meta").textContent=""; $("plyinfo").textContent="–"; return; }
   const g = sel.g;
+  $("plyinfo").textContent = `${ply+1}/${g.fens.length}`;
   $("players").textContent = `Game ${sel.gi+1} · ${g.white}  vs  ${g.black}` + (g.opening? ` · ${g.opening}` : "");
   const have = DEPTHS.filter(d => Array.isArray(g["evals_d"+d]));
   $("meta").textContent = `${sel.m.tag} · ${g.result==="*"?"playing":g.result} · ply ${ply}/${g.fens.length-1}`
@@ -469,7 +470,7 @@ function renderAll(){
     const m = sel.m, gi = sel.gi;
     const anyMissing = [12,20,25].some(d => {
       const a = sel.g["evals_d"+d];
-      return !a || a.some(v => v === undefined || v === 0);
+      return !a || a.some(v => v == null || v === 0);
     });
     if (anyMissing) sweepGame(m, gi, ply);
   }  // resolve sel from selKey before rendering — click must take effect immediately
@@ -481,7 +482,7 @@ function renderAll(){
 
 // On-demand evals: when a game is selected, evaluate d12 for the selected ply
 // first, then remaining plies forward, then from beginning. Then d20, d25.
-const EVALBOX = "http://192.168.50.4:8124";
+const EVALBOX = "http://127.0.0.1:8124";  // Mac Studio local SF17 eval service
 let evalTargetKey = null;  // "tag#gi" of the game being eval'd
 
 async function odEval(fen, depth) {
@@ -523,27 +524,29 @@ async function sweepGame(m, gi, startPly) {
     while (arr.length < fens.length) arr.push(undefined);
     for (let i = startPly; i < fens.length; i++) {
       if (evalTargetKey !== key) return;
-      if (arr[i] !== undefined && arr[i] !== 0) continue;
+      if (arr[i] != null && arr[i] !== 0) continue;
       const cp = await odEval(fens[i], d);
       g = resolve();
       if (!g) { evalTargetKey = null; return; }
       const a2 = g[ek] = g[ek] || [];
       while (a2.length < fens.length) a2.push(undefined);
-      if (cp !== null && cp !== undefined && (a2[i] === undefined || a2[i] === 0)) {
+      if (cp !== null && cp !== undefined && (a2[i] == null || a2[i] === 0)) {
         a2[i] = cp;
+        arr = a2;   // skip-check must track the live array across poll swaps
         renderAll();
       }
     }
     for (let i = 0; i < startPly; i++) {
       if (evalTargetKey !== key) return;
-      if (arr[i] !== undefined && arr[i] !== 0) continue;
+      if (arr[i] != null && arr[i] !== 0) continue;
       const cp = await odEval(fens[i], d);
       g = resolve();
       if (!g) { evalTargetKey = null; return; }
       const a2 = g[ek] = g[ek] || [];
       while (a2.length < fens.length) a2.push(undefined);
-      if (cp !== null && cp !== undefined && (a2[i] === undefined || a2[i] === 0)) {
+      if (cp !== null && cp !== undefined && (a2[i] == null || a2[i] === 0)) {
         a2[i] = cp;
+        arr = a2;   // skip-check must track the live array across poll swaps
         renderAll();
       }
     }
@@ -590,14 +593,61 @@ async function checkPageUpdate(){
   } catch(e) {}
 }
 
+// eval arrays live only in the page: carry them across polls and reloads
+// (keyed by tag#gi) so the 12s refresh never discards computed evals.
+function evalStore(){
+  try { return JSON.parse(localStorage.getItem("flychess.evals") || "{}"); } catch(e){ return {}; }
+}
+function saveEvals(){
+  const st = evalStore();
+  for (const m of DATA) for (let i = 0; i < m.games.length; i++){
+    const g = m.games[i], key = keyOf(m, i), o = st[key] || {};
+    let touched = false;
+    for (const d of DEPTHS){
+      const a = g["evals_d"+d];
+      if (!Array.isArray(a)) continue;
+      const old = Array.isArray(o[d]) ? o[d] : [];
+      let wrote = false;
+      const out = old.slice();
+      for (let k = 0; k < a.length; k++){
+        const v = a[k];
+        if (v != null && v !== 0 && (out[k] == null || out[k] === 0)){ out[k] = v; wrote = true; }
+      }
+      if (wrote || a.length > old.length){ o[d] = out; touched = true; }
+    }
+    if (touched) st[key] = o;
+  }
+  try { localStorage.setItem("flychess.evals", JSON.stringify(st)); } catch(e){}
+}
+function mergeEvals(newData){
+  const st = evalStore();
+  for (const m of newData) for (let i = 0; i < m.games.length; i++){
+    const g = m.games[i], o = st[keyOf(m, i)];
+    if (!o) continue;
+    for (const d of DEPTHS){
+      const saved = o[d];
+      if (!Array.isArray(saved) || !saved.length) continue;
+      const cur = Array.isArray(g["evals_d"+d]) ? g["evals_d"+d] : [];
+      const out = cur.slice();
+      let used = false;
+      for (let k = 0; k < saved.length && k < g.fens.length; k++){
+        if (saved[k] != null && saved[k] !== 0 && (out[k] == null || out[k] === 0)){ out[k] = saved[k]; used = true; }
+      }
+      if (used) g["evals_d"+d] = out;
+    }
+  }
+}
+
 async function poll(){
   try {
-    const r = await fetch("/games.json", {cache:"no-store"});
+    const r = await fetch("/games.json", {cache: "no-store"});
     const j = await r.json();
     const wasEmpty = DATA.length===0;
     const fp = JSON.stringify(j);
     const changed = fp !== poll.lastFp;
     poll.lastFp = fp;
+    saveEvals();       // persist evals living on the OLD objects first...
+    mergeEvals(j);     // ...then carry them (store + server data) into the fresh JSON
     DATA = j;
     if (!selKey || wasEmpty){
       restoreSel();

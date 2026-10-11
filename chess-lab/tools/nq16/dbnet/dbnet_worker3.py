@@ -15,7 +15,8 @@ NODE, CORES, MAXD, API, SF, SHARD = (sys.argv[1], int(sys.argv[2]),
                                      int(sys.argv[3]), sys.argv[4], sys.argv[5],
                                      sys.argv[6])
 MINDEPTH = 1   # operator: store all evals from ply 1
-BUF_TARGET = CORES * 6000
+FIRST_BATCH = min(CORES * 8, 500)   # small first batch: search starts immediately
+BUF_TARGET = CORES * 3000
 REPLENISH_S = 90
 
 
@@ -96,9 +97,11 @@ def main():
     pending = []
     n_pos = 0
     last_replenish = time.time()
+    first = True
     while True:
-        if time.time() - last_replenish > REPLENISH_S or len(pending) < CORES:
-            want = min(BUF_TARGET - len(pending), 20000)
+        if first or time.time() - last_replenish > REPLENISH_S or len(pending) < CORES:
+            want = FIRST_BATCH if first else min(BUF_TARGET - len(pending), 20000)
+            first = False
             if want > 0:
                 r = api("/allocate", {"node": NODE, "engine": "sf17",
                                       "depth": MAXD, "n": want})

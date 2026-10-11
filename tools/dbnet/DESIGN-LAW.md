@@ -33,3 +33,21 @@ failure surface. The cursor protocol is kill-any-process-anytime safe
 with zero bookkeeping: see EVALUATION.md for the measured cost of
 believing otherwise (1,195 LOC and ~5 hours of debugging vs 304 LOC and
 15 minutes, at higher end-to-end throughput for the simple version).
+
+## The objective function (operator, 2026-10-11): score = value / LOC^3
+
+Optimize for solution value divided by the cube of code size. Doubling
+code requires 8x delivered value to break even; 10x code requires 1000x.
+Measured example from this pipeline: lease/shard (1,195 LOC, ~0 sustained
+value once wedged) vs cursor protocol (304 LOC, 15,037 pos/min) — the
+simple version scores ~60x higher even granting the complex one equal
+throughput, and infinitely higher against its real zero.
+
+Counting rules:
+- LOC = net lines of code we own (services, workers, glue), normal
+  formatting, standard idioms — not vendored engines/trainers.
+- Obfuscation/golfing counts as a VALUE regression, not a size win; the
+  metric punishes moving parts, not readable lines.
+- Every PR reports LOC, LOC^3, the measured value, and the score — before
+  review. Deleting code at equal value is the highest-leverage move
+  available (halving size = 8x score).

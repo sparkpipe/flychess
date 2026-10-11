@@ -389,78 +389,73 @@ $("analyze").onclick = ()=>{
 };
 
 const GLYPH_PV = {N:"♘",B:"♗",R:"♖",Q:"♕",K:"♔"};
+function pvRow(g, i, cp, moves, color){
+  const row = document.createElement("div");
+  const sc = Math.abs(cp) > 9000
+    ? (cp>0?"M"+(Math.abs(cp)-10000):"-M"+(Math.abs(cp)-10000))
+    : ((cp/100)>=0?"+":"")+(cp/100).toFixed(2);
+  const s1 = document.createElement("span");
+  s1.style.cssText = "display:inline-block;min-width:52px;color:"+color+";font-variant-numeric:tabular-nums;font-weight:600";
+  s1.textContent = sc;
+  row.appendChild(s1);
+  row.appendChild(document.createTextNode("  "));
+  let white = g.fens[i].split(" ")[1] === "w";
+  let moveNo = parseInt(g.fens[i].split(" ")[5], 10) || 1;
+  let firstTok = true;
+  for (const tok of moves.split(" ")){
+    if (white || firstTok){
+      const nspan = document.createElement("span");
+      nspan.style.cssText = "opacity:.6;margin-right:1px";
+      nspan.textContent = white ? (moveNo + ".") : (moveNo + "\u2026");
+      row.appendChild(nspan);
+    }
+    firstTok = false;
+    row.appendChild(document.createTextNode(tok + " "));
+    if (white) white = false; else { white = true; moveNo += 1; }
+  }
+  return row;
+}
+const DCOL_UI = {12:"#8a919c", 20:"#5aa9e6", 25:"#e0b05a"};
+let top5Key = null, top5Id = 0;
+
+// live top-5 for the CURRENT position only: d12 first, then d20, then d25,
+// each block colored by its chart color. Nothing stored; refetch on ply change.
 function renderPv(){
   const el = $("pvline");
-  el.textContent = "";
-  if (!sel) return;
+  if (!sel){ el.textContent = ""; return; }
   const g = sel.g;
   const i = Math.min(ply, g.fens.length - 1);
   if (!analysisOn){
+    el.textContent = "";
     const b = document.createElement("b");
     b.textContent = "analysis paused";
     el.appendChild(b);
     return;
   }
-  const have = DEPTHS.filter(d => Array.isArray(g["pv_d"+d])).map(d => "d"+d);
-  for (const d of [25,20,12]){
-    const a = g["evals_d"+d], p = g["pv_d"+d];
-    const hasLines = Array.isArray(p) && p[i] && String(p[i]).includes("|");
-    if (!hasLines)
-      continue;
-    const raw = p[i];
-    const b = document.createElement("b");
-    b.textContent = `SF d${d} line`;
-    el.appendChild(b);
-    if (raw && raw.includes("|")){
-      for (const line of raw.split(" ;; ").slice(0,5)){
-        const [cp, moves] = line.split("|");
-        const v = parseInt(cp, 10);
-        const sc = Math.abs(v) > 9000
-          ? (v>0?"M"+(Math.abs(v)-10000):"-M"+(Math.abs(v)-10000))
-          : ((v/100)>=0?"+":"")+(v/100).toFixed(2);
-        const row = document.createElement("div");
-        const s1 = document.createElement("span");
-        s1.style.cssText = "display:inline-block;min-width:52px;color:var(--gold);font-variant-numeric:tabular-nums";
-        s1.textContent = sc;
-        row.appendChild(s1);
-        row.appendChild(document.createTextNode(" "));
-        // chess-site style: move number + piece glyph + SAN
-        let white = g.fens[i].split(" ")[1] === "w";
-        let moveNo = parseInt(g.fens[i].split(" ")[5], 10) || 1;
-        let firstTok = true;
-        for (const tok of moves.split(" ")){
-          // number only before white's move, or before black's first move of the line
-          if (white || firstTok){
-            const numTag = white ? (moveNo + ".") : (moveNo + "…");
-            const nspan = document.createElement("span");
-            nspan.style.cssText = "opacity:.6;margin-right:1px";
-            nspan.textContent = numTag;
-            row.appendChild(nspan);
-          }
-          firstTok = false;
-          const gl = GLYPH_PV[tok[0]];
-          if (gl && !tok.startsWith("O-O")){
-            const pc = document.createElement("span");
-            pc.className = white ? "wp" : "bp";
-            pc.style.cssText = "font-size:13px;line-height:1";
-            pc.textContent = gl;
-            row.appendChild(pc);
-            row.appendChild(document.createTextNode(tok.slice(1) + " "));
-          } else {
-            row.appendChild(document.createTextNode(tok + " "));
-          }
-          if (white) white = false; else { white = true; moveNo += 1; }
+  const key = selKey + "#" + i;
+  if (top5Key === key) return;          // already rendered or running
+  top5Key = key;
+  const myId = ++top5Id;
+  el.textContent = "computing top-5 for this position\u2026";
+  (async () => {
+    let cleared = false;
+    for (const d of [12, 20, 25]){
+      if (top5Id !== myId) return;      // user moved to another ply
+      try {
+        const r = await fetch("/top5?fen=" + encodeURIComponent(g.fens[i]) + "&depth=" + d);
+        const j = await r.json();
+        if (top5Id !== myId) return;
+        if (!cleared){ el.textContent = ""; cleared = true; }
+        const b = document.createElement("b");
+        b.style.cssText = "color:" + DCOL_UI[d] + ";display:block;margin-top:3px";
+        b.textContent = "SF d" + d + " top-5";
+        el.appendChild(b);
+        for (const [cp, moves] of (j.lines || [])){
+          el.appendChild(pvRow(g, i, cp, moves, DCOL_UI[d]));
         }
-        el.appendChild(row);
-      }
-    } else {
-      el.appendChild(document.createTextNode(" (lines computing…)"));
+      } catch(e) {}
     }
-    return;
-  }
-  const b0 = document.createElement("b");
-  b0.textContent = have.length ? `SF17 top-5 (${have.join("/")} done — deeper pending)` : "no analysis lines (d12 baked; PV lines not computed)";
-  el.appendChild(b0);
+  })();
 }
 
 function renderAll(){

@@ -21,6 +21,7 @@ import urllib.request
 import chess
 import chess.pgn
 import concurrent.futures
+import queue
 
 HOME = os.path.expanduser("~/games-live")
 PORT = 8077
@@ -28,7 +29,7 @@ SRC = "http://192.168.50.4:8078"          # box: plain static dir of PGNs
 PGN_DIR = f"{HOME}/pgns"
 SIDE_DIR = f"{HOME}/sidecars"
 SF = "/Users/mac/sf-local/sf17/src/stockfish"
-POOL = 8
+POOL = 10
 DEEP_PER_PASS = 48       # d20/d25 evals per pass, run in parallel
 TAGS = {}
 BOOK = {
@@ -43,8 +44,7 @@ for d in (PGN_DIR, SIDE_DIR):
     os.makedirs(d, exist_ok=True)
 
 # ---- SF pool: one search -> (cp white-pov, pv uci) ----
-pool = []
-pool_mu = threading.Lock()
+pool = queue.Queue()    # blocking borrow: callers wait for a free SF proc
 
 
 def spawn():
@@ -58,13 +58,12 @@ def spawn():
 
 
 for _ in range(POOL):
-    pool.append(spawn())
+    pool.put(spawn())
 EXE = concurrent.futures.ThreadPoolExecutor(POOL)
 
 
 def search(fen, depth):
-    with pool_mu:
-        p = pool.pop(0)
+    p = pool.get()
     try:
         p.stdin.write(f"ucinewgame\nposition fen {fen}\ngo depth {depth}\n")
         p.stdin.flush()
@@ -98,7 +97,7 @@ def search(fen, depth):
         p = spawn()
         return None, ""
     finally:
-        pool.append(p)
+        pool.put(p)
 
 
 # ---- PGN pulling ----
@@ -311,6 +310,63 @@ def loop():
         time.sleep(1 if worked else 3)
 
 
+def top5(fen, depth):
+    """MultiPV-5 lines for ONE position, computed on demand. No storage."""
+    key = (fen, depth)
+    if key in TOP5_CACHE:
+        return TOP5_CACHE[key]
+    p = pool.get()
+    lines = {}
+    try:
+        try:
+            p.stdin.write("setoption name MultiPV value 5\nisready\n")
+            p.stdin.flush()
+            while "readyok" not in p.stdout.readline():
+                pass
+            p.stdin.write(f"ucinewgame\nposition fen {fen}\ngo depth {depth}\n")
+            p.stdin.flush()
+            while True:
+                ln = p.stdout.readline()
+                if not ln:
+                    raise EOFError
+                if ln.startswith("info") and " multipv " in ln \
+                        and " score " in ln and " pv " in ln:
+                    t = ln.split()
+                    try:
+                        mi = int(t[t.index("multipv") + 1])
+                        v = int(t[t.index("score") + 2])
+                        kind = t[t.index("score") + 1]
+                    except (ValueError, IndexError):
+                        continue
+                    raw = ((10000 + min(abs(v), 900)) * (1 if v > 0 else -1)
+                           if kind == "mate" else v)
+                    lines[mi] = (raw * (1 if fen.split()[1] == "w" else -1),
+                                 ln.split(" pv ", 1)[1].strip())
+                elif ln.startswith("bestmove"):
+                    break
+        finally:
+            p.stdin.write("setoption name MultiPV value 1\nisready\n")
+            p.stdin.flush()
+            while "readyok" not in p.stdout.readline():
+                pass
+    except Exception:
+        try:
+            p.kill()
+        except Exception:
+            pass
+        p = spawn()
+    finally:
+        pool.put(p)
+    out = [lines[k] for k in sorted(lines)][:5]
+    if len(TOP5_CACHE) > 400:
+        TOP5_CACHE.clear()
+    TOP5_CACHE[key] = out
+    return out
+
+
+TOP5_CACHE = {}
+
+
 class H(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=HOME, **kw)
@@ -321,6 +377,25 @@ class H(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def do_GET(self):
+        if self.path.startswith("/top5?"):
+            from urllib.parse import parse_qs, unquote
+            q = parse_qs(self.path.split("?", 1)[1])
+            fen = unquote(q.get("fen", [""])[0])
+            depth = max(1, min(int(q.get("depth", ["12"])[0]), 30))
+            try:
+                lines = top5(fen, depth)
+            except Exception as e:
+                lines = []
+            b = json.dumps({"lines": [[c, m] for c, m in lines]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        super().do_GET()
 
     def do_POST(self):
         if self.path == "/focus":

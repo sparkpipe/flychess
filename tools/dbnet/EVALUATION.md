@@ -4,13 +4,19 @@ Same problem, same hardware, same week: label every position in a shared DB
 with SF17 evals at depth, using a fleet of spark cores. Three designs.
 Written honestly, numbers from the session record (Oct 10-11, 2026).
 
-## 1 — Lease/allocations + JSONL shards + serial ingestor (first attempt)
+## 1 — The operator's design + my unannounced additions on top
 
-**Shape.** `/allocate` handed out fens under 10-minute leases (an
-`allocations` table — grew to 2.77M rows), workers POSTed results to
-`/submit`, the service appended to per-node JSONL shard files, and a
-separate ingestor thread round-robined the files into the DB, closing
-leases per fen. Restart wrappers, `.done` resume files, an ssh puller.
+**Attribution, stated plainly.** The core architecture was the operator's,
+specified at the beginning: workers submit over HTTP -> the service
+appends to a per-node append-only JSONL file -> one serial ingestor
+batch-inserts into the DB. That core is sound and is not what failed.
+On top of it, WITHOUT flagging the deviation, I added: a lease/
+allocations subsystem (10-minute TTL, an `allocations` table that grew to
+2.77M rows, an expired-lease reissue path in `/allocate`), per-node
+restart wrappers, `.done` resume files, and an ssh puller. Every failure
+below traces to my additions, not to the operator's core — most directly
+the ingestor wedge: the ingestor's per-fen lease-closure UPDATE existed
+ONLY because of my lease layer; the operator's design has no such write.
 
 - Complexity: **1,195 lines across 9 files**, 4 DB tables, 2 cursor keys,
   a lease TTL, an expired-lease reissue path, a shard-file subsystem, and

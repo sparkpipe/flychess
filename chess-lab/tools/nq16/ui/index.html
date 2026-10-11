@@ -84,6 +84,8 @@
       <div id="chartcard">
         <div class="legend">
           <span><span class="sw" style="background:#6b7280"></span>SF d12</span>
+          <span><span class="sw" style="background:#5aa9e6"></span>SF d20</span>
+          <span><span class="sw" style="background:#e0b05a"></span>SF d25</span>
           <span style="margin-left:auto">white-pov cp · click chart to jump</span>
         </div>
         <svg id="chart" preserveAspectRatio="none"></svg>
@@ -407,7 +409,7 @@ function renderPv(){
       continue;
     const raw = p[i];
     const b = document.createElement("b");
-    b.textContent = `SF d${d} top-5`;
+    b.textContent = `SF d${d} line`;
     el.appendChild(b);
     if (raw && raw.includes("|")){
       for (const line of raw.split(" ;; ").slice(0,5)){
@@ -547,7 +549,7 @@ document.addEventListener("keydown",e=>{
 });
 
 poll();
-setInterval(poll, 12000);
+setInterval(poll, 4000);
 </script>
 </body>
 </html>

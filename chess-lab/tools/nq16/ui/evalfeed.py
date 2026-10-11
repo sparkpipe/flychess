@@ -20,6 +20,7 @@ import urllib.request
 
 import chess
 import chess.pgn
+import concurrent.futures
 
 HOME = os.path.expanduser("~/games-live")
 PORT = 8077
@@ -27,8 +28,8 @@ SRC = "http://192.168.50.4:8078"          # box: plain static dir of PGNs
 PGN_DIR = f"{HOME}/pgns"
 SIDE_DIR = f"{HOME}/sidecars"
 SF = "/Users/mac/sf-local/sf17/src/stockfish"
-POOL = 4
-D20_S_PER_PASS = 2.0
+POOL = 8
+DEEP_PER_PASS = 48       # d20/d25 evals per pass, run in parallel
 TAGS = {}
 BOOK = {
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w": ("startpos", []),
@@ -58,6 +59,7 @@ def spawn():
 
 for _ in range(POOL):
     pool.append(spawn())
+EXE = concurrent.futures.ThreadPoolExecutor(POOL)
 
 
 def search(fen, depth):
@@ -115,11 +117,19 @@ def pull_pgns():
     for name in list_pgns():
         want = f"{PGN_DIR}/{name}"
         have = os.path.getsize(want) if os.path.exists(want) else -1
-        data = fetch(f"{SRC}/{name}")
+        with urllib.request.urlopen(f"{SRC}/{name}", timeout=30) as r:
+            data = r.read()
+            lm = r.headers.get("Last-Modified")
         if len(data) != have:
+            ts = None
+            if lm:
+                import email.utils
+                ts = email.utils.mktime_tz(email.utils.parsedate_tz(lm))
             with open(want + ".tmp", "wb") as f:
                 f.write(data)
             os.replace(want + ".tmp", want)
+            if ts:
+                os.utime(want, (ts, ts))   # keep source mtime -> stable order
             changed.append(name)
     return changed
 
@@ -190,22 +200,31 @@ def atomic_json(obj, path):
     os.replace(tmp, path)
 
 
-def fill_sidecars(games, side, deadline_d20):
-    for g in games:
-        for depth in (12, 20):
-            if depth == 20 and time.time() > deadline_d20:
-                break
-            for fen in g["fens"]:
-                e = side.get(fen)
-                if e and str(depth) in e and f"{depth}pv" in e:
-                    continue
-                cp, pv = search(fen, depth)
-                if cp is None:
-                    continue
-                e = side.setdefault(fen, {})
-                e[str(depth)] = cp
-                e[f"{depth}pv"] = f"{cp}|{pv}" if pv else "|"
-    return side
+def run_batch(pairs, side):
+    """Evaluate (fen, depth) pairs in parallel, merging into the sidecar."""
+    def work(fd):
+        fen, depth = fd
+        cp, pv = search(fen, depth)
+        return fd, cp, pv
+    for (fen, depth), cp, pv in EXE.map(work, pairs):
+        if cp is None:
+            continue
+        e = side.setdefault(fen, {})
+        e[str(depth)] = cp
+        e[f"{depth}pv"] = f"{cp}|{pv}" if pv else "|"
+
+
+def gaps(side, games, depth, skip=None):
+    out = []
+    for j, g in enumerate(games):
+        if skip is not None and j == skip:
+            continue
+        for fen in g["fens"]:
+            e = side.get(fen)
+            if e and str(depth) in e and f"{depth}pv" in e:
+                continue
+            out.append((fen, depth))
+    return out
 
 
 def build(pgn_names):
@@ -216,40 +235,80 @@ def build(pgn_names):
             continue
         side = load_json(sidecar_path(name), {})
         for g in games:
-            for depth in (12, 20):
+            for depth in (12, 20, 25):
                 g[f"evals_d{depth}"] = [side.get(f, {}).get(str(depth))
                                         for f in g["fens"]]
                 g[f"pv_d{depth}"] = [side.get(f, {}).get(f"{depth}pv") or None
                                      for f in g["fens"]]
-        doc.append({"tag": TAGS.get(name, name[:-4]), "games": games})
+        doc.append({"tag": TAGS.get(name, name[:-4]), "games": games,
+                    "name": name})
     return doc
 
 
 def loop():
     while True:
+        worked = False
         try:
             pull_pgns()
-            names = sorted(n for n in os.listdir(PGN_DIR) if n.endswith(".pgn"))
+            names = sorted((n for n in os.listdir(PGN_DIR) if n.endswith(".pgn")),
+                           key=lambda n: os.path.getmtime(f"{PGN_DIR}/{n}"))
             doc = build(names)
-            deadline = time.time() + D20_S_PER_PASS
-            for i, m in enumerate(doc):
-                side = load_json(sidecar_path(names[i]), {})
-                n0 = len(side)
-                fill_sidecars(m["games"], side, deadline)
-                if len(side) != n0:
-                    atomic_json(side, sidecar_path(names[i]))
-                for g in m["games"]:
-                    for depth in (12, 20):
-                        g[f"evals_d{depth}"] = [
-                            side.get(f, {}).get(str(depth)) for f in g["fens"]]
-                        g[f"pv_d{depth}"] = [
-                            side.get(f, {}).get(f"{depth}pv") or None
-                            for f in g["fens"]]
-            atomic_json(doc, f"{HOME}/games.json")
+            sides = {m["name"]: load_json(sidecar_path(m["name"]), {})
+                     for m in doc}
+            focus = load_json(f"{HOME}/focus.json", {})
+            ft, fg = focus.get("tag"), focus.get("gi")
+
+            def emit():
+                for m in doc:
+                    side = sides.get(m["name"], {})
+                    for g in m["games"]:
+                        for depth in (12, 20, 25):
+                            g[f"evals_d{depth}"] = [
+                                side.get(f, {}).get(str(depth))
+                                for f in g["fens"]]
+                            g[f"pv_d{depth}"] = [
+                                side.get(f, {}).get(f"{depth}pv") or None
+                                for f in g["fens"]]
+                atomic_json(doc, f"{HOME}/games.json")
+
+            # 1. d12 gaps everywhere (fast, always first)
+            for m in doc:
+                side = sides[m["name"]]
+                t = gaps(side, m["games"], 12)
+                if t:
+                    run_batch(t, side)
+                    atomic_json(side, sidecar_path(m["name"]))
+                    worked = True
+            # 2. focused game: d20 start-to-finish, then d25 — uncapped
+            for m in doc:
+                if m["tag"] != ft or not isinstance(fg, int) \
+                        or not (0 <= fg < len(m["games"])):
+                    continue
+                side = sides[m["name"]]
+                g = m["games"][fg]
+                for depth in (20, 25):
+                    t = gaps(side, [g], depth)
+                    if t:
+                        run_batch(t, side)
+                        atomic_json(side, sidecar_path(m["name"]))
+                        emit()          # chart deepens as evals land
+                        worked = True
+                break
+            # 3. background deep fill for everything else
+            for m in doc:
+                side = sides[m["name"]]
+                skip = fg if m["tag"] == ft else None
+                t = gaps(side, m["games"], 20, skip=skip) \
+                    + gaps(side, m["games"], 25, skip=skip)
+                if t:
+                    run_batch(t[:DEEP_PER_PASS], side)
+                    atomic_json(side, sidecar_path(m["name"]))
+                    worked = True
+            emit()
         except Exception as e:
             with open(f"{HOME}/feed_errors.log", "a") as el:
                 el.write(f"{time.strftime('%H:%M:%S')} {e}\n")
-        time.sleep(3)
+        time.sleep(1 if worked else 3)
 
 
 class H(http.server.SimpleHTTPRequestHandler):

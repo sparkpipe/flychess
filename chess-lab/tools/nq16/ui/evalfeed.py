@@ -365,6 +365,21 @@ def top5(fen, depth):
 
 
 TOP5_CACHE = {}
+G1 = "http://192.168.50.4:8126/top"
+
+
+def to_san(fen, pv_uci, limit=16):
+    """uci pv -> SAN string (move-list style tokens)."""
+    b = chess.Board(fen)
+    out = []
+    for u in pv_uci.split()[:limit]:
+        try:
+            mv = chess.Move.from_uci(u)
+            out.append(b.san(mv))
+            b.push(mv)
+        except Exception:
+            break
+    return " ".join(out)
 
 
 class H(http.server.SimpleHTTPRequestHandler):
@@ -388,7 +403,27 @@ class H(http.server.SimpleHTTPRequestHandler):
                 lines = top5(fen, depth)
             except Exception as e:
                 lines = []
-            b = json.dumps({"lines": [[c, m] for c, m in lines]}).encode()
+            b = json.dumps({"lines": [[c, to_san(fen, m)] for c, m in lines]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        if self.path.startswith("/top5g?"):
+            from urllib.parse import parse_qs, quote
+            import urllib.request as _rq
+            q = parse_qs(self.path.split("?", 1)[1])
+            fen = q.get("fen", [""])[0]
+            depth = q.get("depth", ["12"])[0]
+            try:
+                url = G1 + "?fen=" + quote(fen, safe="") + "&depth=" + depth
+                with _rq.urlopen(url, timeout=120) as r:
+                    j = json.load(r)
+                lines = [[c, to_san(fen, m)] for c, m in j.get("lines", [])]
+            except Exception:
+                lines = []
+            b = json.dumps({"lines": lines}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(b)))

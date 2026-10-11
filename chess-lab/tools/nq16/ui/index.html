@@ -38,8 +38,8 @@
   #nav button:hover { border-color:var(--acc); }
   #nav .plyinfo { color:var(--dim); font-variant-numeric:tabular-nums; margin:0 8px; min-width:70px; text-align:center; }
   #nav #analyze { padding:4px 10px; opacity:.8; }
-  #pvline { font:10px/1.5 "SF Mono",Menlo,monospace; color:var(--dim); min-height:16px;
-             max-width:min(56vh,480px); white-space:nowrap; overflow:hidden; }
+  #pvline { max-height:300px; overflow-y:auto; font:10px/1.5 "SF Mono",Menlo,monospace; color:var(--dim); min-height:16px;
+             max-width:min(56vh,480px); white-space:nowrap; overflow-x:hidden; }
   #pvline b { color:#b08d4a; font-weight:500; font-size:10px; }
   #rightcol { flex:1; display:flex; flex-direction:column; gap:10px; min-width:280px;
               position:relative; z-index:2; background:var(--bg); }
@@ -410,7 +410,7 @@ function pvRow(g, i, cp, moves, color){
       row.appendChild(nspan);
     }
     firstTok = false;
-    row.appendChild(document.createTextNode(tok + " "));
+    row.appendChild(document.createTextNode(fmtMove(tok) + " "));
     if (white) white = false; else { white = true; moveNo += 1; }
   }
   return row;
@@ -445,7 +445,7 @@ function renderPv(){
         const r = await fetch("/top5?fen=" + encodeURIComponent(g.fens[i]) + "&depth=" + d);
         const j = await r.json();
         if (top5Id !== myId) return;
-        if (!cleared){ el.textContent = ""; cleared = true; }
+        el.textContent = "";   // deeper depth replaces shallower display
         const b = document.createElement("b");
         b.style.cssText = "color:" + DCOL_UI[d] + ";display:block;margin-top:3px";
         b.textContent = "SF d" + d + " top-5";
@@ -453,6 +453,18 @@ function renderPv(){
         for (const [cp, moves] of (j.lines || [])){
           el.appendChild(pvRow(g, i, cp, moves, DCOL_UI[d]));
         }
+        try {
+          const r2 = await fetch("/top5g?fen=" + encodeURIComponent(g.fens[i]) + "&depth=" + d);
+          const j2 = await r2.json();
+          if (top5Id !== myId) return;
+          const b2 = document.createElement("b");
+          b2.style.cssText = "color:#7bd88f;display:block;margin-top:4px";
+          b2.textContent = "general1 d" + d + " top-3";
+          el.appendChild(b2);
+          for (const [cp, moves] of (j2.lines || [])){
+            el.appendChild(pvRow(g, i, cp, moves, "#7bd88f"));
+          }
+        } catch(e2) {}
       } catch(e) {}
     }
   })();

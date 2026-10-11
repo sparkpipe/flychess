@@ -51,3 +51,19 @@ Counting rules:
 - Every PR reports LOC, LOC^3, the measured value, and the score — before
   review. Deleting code at equal value is the highest-leverage move
   available (halving size = 8x score).
+
+## Milestone-PR law (operator, 2026-10-11: "you never make PR to evaluate before I pester you")
+
+PRs are opened at every working milestone, BEFORE being asked — they are
+the evaluation checkpoint, not an afterthought. Tiers:
+
+- under ~50 LOC: implement, PR immediately after.
+- ~50-300 LOC: implement, PR with the template numbers filled.
+- over ~300 LOC or any new subsystem: open the PR with the DESIGN first
+  (raft spec + LOC^3 math + the simpler version not built), get the
+  ruling, then write the code into that PR.
+
+The PR template (.github/PULL_REQUEST_TEMPLATE.md) makes the simplicity
+case structural: value, LOC, LOC^3, score, and the rejected simpler
+version are filled in before review, so complexity can only reach the
+operator as an explicit, numbered deviation they can reject in one click.

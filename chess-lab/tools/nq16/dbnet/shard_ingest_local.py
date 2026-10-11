@@ -30,7 +30,9 @@ def ingest_file(con, path):
         return 0
     con.executemany(
         "insert or replace into labels(fen, engine, depth, cp, by_node, labeled_at)"
-        " values (?,?,?,?,?, datetime('now'))", labels)
+        " values (?,?,?,?,?,?)",
+        [(f, e, d, cp, n, time.strftime("%Y-%m-%dT%H:%M:%S"))
+         for f, e, d, cp, n, _ in labels])
     best = {}
     for fen, _, d, cp, _, _ in labels:
         d = int(d)
@@ -38,11 +40,12 @@ def ingest_file(con, path):
             best[fen] = (d, cp)
     con.executemany(
         "insert into deepest(fen, engine, depth, cp, by_node, labeled_at)"
-        " values (?,?,?,?,?, datetime('now'))"
+        " values (?,?,?,?,?,?)"
         " on conflict(fen) do update set depth=excluded.depth, cp=excluded.cp,"
         " by_node=excluded.by_node, labeled_at=excluded.labeled_at"
         " where excluded.depth > deepest.depth",
-        [(f, "sf17", d, cp, node) for f, (d, cp) in best.items()])
+        [(f, "sf17", d, cp, node,
+          time.strftime("%Y-%m-%dT%H:%M:%S")) for f, (d, cp) in best.items()])
     con.executemany(
         "update allocations set state='done' where fen=? and state='open'",
         [(f,) for f in best])

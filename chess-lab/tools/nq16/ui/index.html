@@ -455,43 +455,48 @@ function renderPv(){
   el.textContent = "computing top-5 for this position\u2026";
   (async () => {
     const fen = encodeURIComponent(g.fens[i]);
+    // per-depth: fire all three engines concurrently, render each as it
+    // arrives; the next depth replaces the display (only after its own SF
+    // results are in — the fastest engine governs the transition)
     for (const d of [12, 20, 25]){
       if (top5Id !== myId) return;
-      try {
-        // fetch all three engines in parallel so none gets wiped by the next depth
-        const [jSF, jG1, jC16] = await Promise.all([
-          fetch("/top5?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []})),
-          fetch("/top5g?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []})),
-          fetch("/top5c?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []}))
-        ]);
+      const pSF = fetch("/top5?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []}));
+      const pG1 = fetch("/top5g?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []}));
+      const pC16 = fetch("/top5c?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []}));
+      // SF is local and fast — it gates the depth transition
+      const jSF = await pSF;
+      if (top5Id !== myId) return;
+      el.textContent = "";
+      const b = document.createElement("b");
+      b.style.cssText = "color:" + DCOL_UI[d] + ";display:block;margin-top:3px";
+      b.textContent = "SF d" + d + " top-5";
+      el.appendChild(b);
+      for (const [cp, moves] of (jSF.lines || [])){
+        el.appendChild(pvRow(g, i, cp, moves, DCOL_UI[d]));
+      }
+      // general1 and correct16 stream in when ready (same depth block)
+      pG1.then(j2 => {
         if (top5Id !== myId) return;
-        el.textContent = "";   // deeper depth replaces shallower display
-        const b = document.createElement("b");
-        b.style.cssText = "color:" + DCOL_UI[d] + ";display:block;margin-top:3px";
-        b.textContent = "SF d" + d + " top-5";
-        el.appendChild(b);
-        for (const [cp, moves] of (jSF.lines || [])){
-          el.appendChild(pvRow(g, i, cp, moves, DCOL_UI[d]));
+        if (!j2.lines || !j2.lines.length) return;
+        const b2 = document.createElement("b");
+        b2.style.cssText = "color:#7bd88f;display:block;margin-top:4px";
+        b2.textContent = "general1 d" + d + " top-3";
+        el.appendChild(b2);
+        for (const [cp, moves] of j2.lines){
+          el.appendChild(pvRow(g, i, cp, moves, "#7bd88f"));
         }
-        if (jG1.lines && jG1.lines.length){
-          const b2 = document.createElement("b");
-          b2.style.cssText = "color:#7bd88f;display:block;margin-top:4px";
-          b2.textContent = "general1 d" + d + " top-3";
-          el.appendChild(b2);
-          for (const [cp, moves] of jG1.lines){
-            el.appendChild(pvRow(g, i, cp, moves, "#7bd88f"));
-          }
+      });
+      pC16.then(j3 => {
+        if (top5Id !== myId) return;
+        if (!j3.lines || !j3.lines.length) return;
+        const b3 = document.createElement("b");
+        b3.style.cssText = "color:#e88f7b;display:block;margin-top:4px";
+        b3.textContent = "correct16 d" + d + " top-3";
+        el.appendChild(b3);
+        for (const [cp, moves] of j3.lines){
+          el.appendChild(pvRow(g, i, cp, moves, "#e88f7b"));
         }
-        if (jC16.lines && jC16.lines.length){
-          const b3 = document.createElement("b");
-          b3.style.cssText = "color:#e88f7b;display:block;margin-top:4px";
-          b3.textContent = "correct16 d" + d + " top-3";
-          el.appendChild(b3);
-          for (const [cp, moves] of jC16.lines){
-            el.appendChild(pvRow(g, i, cp, moves, "#e88f7b"));
-          }
-        }
-      } catch(e) {}
+      });
     }
   })();
 }

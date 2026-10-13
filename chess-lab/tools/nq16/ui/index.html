@@ -27,8 +27,8 @@
   #hdr .players { font-size:17px; font-weight:600; }
   #hdr .meta { color:var(--dim); font-size:12px; }
   #center { display:flex; gap:18px; flex:1; min-height:0; }
-  #leftcol { display:flex; flex-direction:column; gap:8px; }
-  #board { width:min(56vh,480px); height:min(56vh,480px); display:grid; grid-template:repeat(8,1fr)/repeat(8,1fr); border:2px solid var(--line); border-radius:4px; overflow:hidden; user-select:none; }
+  #leftcol { display:flex; flex-direction:column; gap:8px; flex-shrink:0; }
+  #board { width:min(56vh,480px); aspect-ratio:1; display:grid; grid-template:repeat(8,1fr)/repeat(8,1fr); border:2px solid var(--line); border-radius:4px; overflow:hidden; user-select:none; flex-shrink:0; }
   .sq { position:relative; display:flex; align-items:center; justify-content:center; }
   .lt { background:#e8ddc7; } .dk { background:#a97f5f; }
   .sq img { width:90%; height:90%; pointer-events:none; }
@@ -142,12 +142,14 @@ function renderSide(){
     const scoreStr = scoreA + draws/2 === scoreB + draws/2 && scoreA === scoreB && draws === m.games.length
       ? "½–½" : `${scoreA + draws/2}–${scoreB + draws/2}`;
 
+    // time control from the match tag (e.g. "1s", "2s_vs_1s", "10s")
+    const tc = (m.tag.match(/(\d+s)/g) || []).join(" vs ");
     // expandable header: just "A vs B  X.X–Y.Y" — no tag duplication
     const hdr = document.createElement("div"); hdr.className="mhdr";
     const arr = document.createElement("span"); arr.className="arrow"; arr.textContent="▸";
     hdr.appendChild(arr);
     const res_s = document.createElement("span"); res_s.className="mresult";
-    res_s.textContent = `${a} vs ${b}  ${scoreStr}`;
+    res_s.textContent = `${a} vs ${b}  ${scoreStr}` + (tc ? `  (${tc})` : "");
     hdr.appendChild(res_s);
     md.appendChild(hdr);
     const gamesDiv = document.createElement("div"); gamesDiv.className="games";

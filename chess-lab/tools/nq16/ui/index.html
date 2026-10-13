@@ -155,10 +155,16 @@ function renderSide(){
     const gamesDiv = document.createElement("div"); gamesDiv.className="games";
     md.appendChild(gamesDiv);
 
-    // expand the match containing the selected game, or the newest
-    if (selKey && selKey.startsWith(m.tag+"#")) md.classList.add("open");
-    else if (!document.querySelector(".match.open") && [...DATA].reverse().indexOf(m) === 0) md.classList.add("open");
-    hdr.onclick = ()=> md.classList.toggle("open");
+    // collapsed by default; persist toggle state across re-renders
+    // (the poll recreates the DOM every 4s — the Set survives)
+    if (!window._openMatches) window._openMatches = new Set();
+    const isOpen = _openMatches.has(m.tag) ||
+                   (selKey && selKey.startsWith(m.tag+"#"));
+    if (isOpen) md.classList.add("open");
+    hdr.onclick = ()=>{
+      if (md.classList.contains("open")) { md.classList.remove("open"); _openMatches.delete(m.tag); }
+      else { md.classList.add("open"); _openMatches.add(m.tag); }
+    };
 
     const md_games = gamesDiv;  // game buttons go inside the collapsible
     let prevOpen = null;
@@ -179,7 +185,7 @@ function renderSide(){
         prevOpen = openLabel;
       } else prevOpen = null;
       if (keyOf(m,gi)===selKey) b.classList.add("sel");
-      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll(); };
+      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); _openMatches.add(m.tag); renderAll(); };
       md_games.appendChild(b);
     });
     root.appendChild(md);

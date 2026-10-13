@@ -128,8 +128,7 @@ function renderSide(){
   const root = $("matchlist"); root.textContent = "";
   for (const m of [...DATA].reverse()){
     const md = document.createElement("div"); md.className="match";
-    const t = document.createElement("div"); t.className="tag"; t.textContent = m.tag; md.appendChild(t);
-    // match score summary: wins per engine across all games
+    // score summary
     const wins = {};
     let draws = 0;
     for (const g of m.games){
@@ -138,11 +137,31 @@ function renderSide(){
       else if (g.result==="1/2-1/2") draws++;
     }
     const names = [...new Set(m.games.flatMap(g=>[g.white,g.black]))];
-    if (names.length){
-      const sc = document.createElement("div"); sc.className="score";
-      sc.textContent = names.map(n=>`${n} ${wins[n]||0}`).join("  ·  ") + (draws? `  ·  draws ${draws}` : "");
-      md.appendChild(sc);
-    }
+    const a = names[0]||"", b = names[1]||"";
+    const scoreA = wins[a]||0, scoreB = wins[b]||0;
+    const scoreStr = scoreA + draws/2 === scoreB + draws/2 && scoreA === scoreB && draws === m.games.length
+      ? "½–½" : `${scoreA + draws/2}–${scoreB + draws/2}`;
+
+    // expandable header: tag + opponents + result
+    const hdr = document.createElement("div"); hdr.className="mhdr";
+    const arr = document.createElement("span"); arr.className="arrow"; arr.textContent="▸";
+    hdr.appendChild(arr);
+    const tag_s = document.createElement("span"); tag_s.className="mtag";
+    tag_s.textContent = m.tag;
+    hdr.appendChild(tag_s);
+    const res_s = document.createElement("span"); res_s.className="mresult";
+    res_s.textContent = `${a} vs ${b}  ${scoreStr}`;
+    hdr.appendChild(res_s);
+    md.appendChild(hdr);
+    const gamesDiv = document.createElement("div"); gamesDiv.className="games";
+    md.appendChild(gamesDiv);
+
+    // expand the match containing the selected game, or the newest
+    if (selKey && selKey.startsWith(m.tag+"#")) md.classList.add("open");
+    else if (!document.querySelector(".match.open") && [...DATA].reverse().indexOf(m) === 0) md.classList.add("open");
+    hdr.onclick = ()=> md.classList.toggle("open");
+
+    const md_games = gamesDiv;  // game buttons go inside the collapsible
     let prevOpen = null;
     m.games.forEach((g,gi)=>{
       const b = document.createElement("button"); b.className="gbtn";
@@ -162,7 +181,7 @@ function renderSide(){
       } else prevOpen = null;
       if (keyOf(m,gi)===selKey) b.classList.add("sel");
       b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll(); };
-      md.appendChild(b);
+      md_games.appendChild(b);
     });
     root.appendChild(md);
   }

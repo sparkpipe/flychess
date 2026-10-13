@@ -454,45 +454,43 @@ function renderPv(){
   const myId = ++top5Id;
   el.textContent = "computing top-5 for this position\u2026";
   (async () => {
-    let cleared = false;
+    const fen = encodeURIComponent(g.fens[i]);
     for (const d of [12, 20, 25]){
-      if (top5Id !== myId) return;      // user moved to another ply
+      if (top5Id !== myId) return;
       try {
-        const r = await fetch("/top5?fen=" + encodeURIComponent(g.fens[i]) + "&depth=" + d);
-        const j = await r.json();
+        // fetch all three engines in parallel so none gets wiped by the next depth
+        const [jSF, jG1, jC16] = await Promise.all([
+          fetch("/top5?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []})),
+          fetch("/top5g?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []})),
+          fetch("/top5c?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []}))
+        ]);
         if (top5Id !== myId) return;
         el.textContent = "";   // deeper depth replaces shallower display
         const b = document.createElement("b");
         b.style.cssText = "color:" + DCOL_UI[d] + ";display:block;margin-top:3px";
         b.textContent = "SF d" + d + " top-5";
         el.appendChild(b);
-        for (const [cp, moves] of (j.lines || [])){
+        for (const [cp, moves] of (jSF.lines || [])){
           el.appendChild(pvRow(g, i, cp, moves, DCOL_UI[d]));
         }
-        try {
-          const r2 = await fetch("/top5g?fen=" + encodeURIComponent(g.fens[i]) + "&depth=" + d);
-          const j2 = await r2.json();
-          if (top5Id !== myId) return;
+        if (jG1.lines && jG1.lines.length){
           const b2 = document.createElement("b");
           b2.style.cssText = "color:#7bd88f;display:block;margin-top:4px";
           b2.textContent = "general1 d" + d + " top-3";
           el.appendChild(b2);
-          for (const [cp, moves] of (j2.lines || [])){
+          for (const [cp, moves] of jG1.lines){
             el.appendChild(pvRow(g, i, cp, moves, "#7bd88f"));
           }
-        } catch(e2) {}
-        try {
-          const r3 = await fetch("/top5c?fen=" + encodeURIComponent(g.fens[i]) + "&depth=" + d);
-          const j3 = await r3.json();
-          if (top5Id !== myId) return;
+        }
+        if (jC16.lines && jC16.lines.length){
           const b3 = document.createElement("b");
           b3.style.cssText = "color:#e88f7b;display:block;margin-top:4px";
           b3.textContent = "correct16 d" + d + " top-3";
           el.appendChild(b3);
-          for (const [cp, moves] of (j3.lines || [])){
+          for (const [cp, moves] of jC16.lines){
             el.appendChild(pvRow(g, i, cp, moves, "#e88f7b"));
           }
-        } catch(e3) {}
+        }
       } catch(e) {}
     }
   })();

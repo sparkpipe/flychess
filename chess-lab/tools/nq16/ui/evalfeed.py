@@ -366,6 +366,7 @@ def top5(fen, depth):
 
 TOP5_CACHE = {}
 G1 = "http://192.168.50.4:8126/top"
+C16 = "http://192.168.50.4:8127/top"
 
 
 def to_san(fen, pv_uci, limit=16):
@@ -410,14 +411,15 @@ class H(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b)
             return
-        if self.path.startswith("/top5g?"):
+        if self.path.startswith("/top5g?") or self.path.startswith("/top5c?"):
             from urllib.parse import parse_qs, quote
             import urllib.request as _rq
+            base = C16 if self.path.startswith("/top5c?") else G1
             q = parse_qs(self.path.split("?", 1)[1])
             fen = q.get("fen", [""])[0]
             depth = q.get("depth", ["12"])[0]
             try:
-                url = G1 + "?fen=" + quote(fen, safe="") + "&depth=" + depth
+                url = base + "?fen=" + quote(fen, safe="") + "&depth=" + depth
                 with _rq.urlopen(url, timeout=120) as r:
                     j = json.load(r)
                 lines = [[c, to_san(fen, m)] for c, m in j.get("lines", [])]

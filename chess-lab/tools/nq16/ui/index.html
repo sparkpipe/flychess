@@ -157,10 +157,12 @@ function renderSide(){
 
     // collapsed by default; persist toggle state across re-renders
     // (the poll recreates the DOM every 4s — the Set survives)
-    if (!window._openMatches) window._openMatches = new Set();
-    const isOpen = _openMatches.has(m.tag) ||
-                   (selKey && selKey.startsWith(m.tag+"#"));
-    if (isOpen) md.classList.add("open");
+    if (!window._openMatches) {
+      window._openMatches = new Set();
+      // first load only: open the selected match
+      if (selKey) for (const mm of DATA) if (selKey.startsWith(mm.tag+"#")) _openMatches.add(mm.tag);
+    }
+    if (_openMatches.has(m.tag)) md.classList.add("open");
     hdr.onclick = ()=>{
       if (md.classList.contains("open")) { md.classList.remove("open"); _openMatches.delete(m.tag); }
       else { md.classList.add("open"); _openMatches.add(m.tag); }

@@ -9,7 +9,15 @@
   body { background:var(--bg); color:var(--fg); font:14px/1.45 -apple-system,Helvetica,Arial,sans-serif; display:flex; height:100vh; overflow:hidden; }
   #side { width:320px; min-width:260px; background:var(--panel); border-right:1px solid var(--line); overflow-y:auto; padding:10px; }
   #side h1 { font-size:15px; margin:4px 0 10px; color:var(--gold); }
-  .match { margin-bottom:14px; }
+  .match { margin-bottom:6px; border-bottom:1px solid var(--line); padding:4px 0; }
+  .mhdr { cursor:pointer; user-select:none; padding:2px 0; }
+  .mhdr:hover { color:var(--fg); }
+  .mhdr .arrow { display:inline-block; width:14px; transition:transform .15s; font-size:10px; color:var(--dim); }
+  .match.open .mhdr .arrow { transform:rotate(90deg); }
+  .match .games { display:none; }
+  .match.open .games { display:block; }
+  .mhdr .mresult { font-size:12px; color:var(--fg); margin-left:4px; font-weight:600; }
+  .mhdr .mresult .score-part { color:var(--gold); font-variant-numeric:tabular-nums; }
   .match .tag { color:var(--acc); font-weight:600; font-size:12px; letter-spacing:.4px; margin-bottom:4px; }
   .mrow.bk .mno { color:#4a515e; }
   .bkmv { color:#5f6774 !important; font-style:italic; }
@@ -27,8 +35,8 @@
   #hdr .players { font-size:17px; font-weight:600; }
   #hdr .meta { color:var(--dim); font-size:12px; }
   #center { display:flex; gap:18px; flex:1; min-height:0; }
-  #leftcol { display:flex; flex-direction:column; gap:8px; }
-  #board { width:min(56vh,480px); height:min(56vh,480px); display:grid; grid-template:repeat(8,1fr)/repeat(8,1fr); border:2px solid var(--line); border-radius:4px; overflow:hidden; user-select:none; }
+  #leftcol { display:flex; flex-direction:column; gap:8px; flex-shrink:0; }
+  #board { width:min(56vh,480px); aspect-ratio:1; display:grid; grid-template:repeat(8,1fr)/repeat(8,1fr); border:2px solid var(--line); border-radius:4px; overflow:hidden; user-select:none; flex-shrink:0; }
   .sq { position:relative; display:flex; align-items:center; justify-content:center; }
   .lt { background:#e8ddc7; } .dk { background:#a97f5f; }
   .sq img { width:90%; height:90%; pointer-events:none; }
@@ -38,8 +46,8 @@
   #nav button:hover { border-color:var(--acc); }
   #nav .plyinfo { color:var(--dim); font-variant-numeric:tabular-nums; margin:0 8px; min-width:70px; text-align:center; }
   #nav #analyze { padding:4px 10px; opacity:.8; }
-  #pvline { font:10px/1.5 "SF Mono",Menlo,monospace; color:var(--dim); min-height:16px;
-             max-width:min(56vh,480px); white-space:nowrap; overflow:hidden; }
+  #pvline { max-height:300px; overflow-y:auto; font:10px/1.5 "SF Mono",Menlo,monospace; color:var(--dim); min-height:16px;
+             max-width:min(56vh,480px); white-space:nowrap; overflow-x:hidden; }
   #pvline b { color:#b08d4a; font-weight:500; font-size:10px; }
   #rightcol { flex:1; display:flex; flex-direction:column; gap:10px; min-width:280px;
               position:relative; z-index:2; background:var(--bg); }
@@ -128,8 +136,7 @@ function renderSide(){
   const root = $("matchlist"); root.textContent = "";
   for (const m of [...DATA].reverse()){
     const md = document.createElement("div"); md.className="match";
-    const t = document.createElement("div"); t.className="tag"; t.textContent = m.tag; md.appendChild(t);
-    // match score summary: wins per engine across all games
+    // score summary
     const wins = {};
     let draws = 0;
     for (const g of m.games){
@@ -138,11 +145,38 @@ function renderSide(){
       else if (g.result==="1/2-1/2") draws++;
     }
     const names = [...new Set(m.games.flatMap(g=>[g.white,g.black]))];
-    if (names.length){
-      const sc = document.createElement("div"); sc.className="score";
-      sc.textContent = names.map(n=>`${n} ${wins[n]||0}`).join("  ·  ") + (draws? `  ·  draws ${draws}` : "");
-      md.appendChild(sc);
+    const a = names[0]||"", b = names[1]||"";
+    const scoreA = wins[a]||0, scoreB = wins[b]||0;
+    const scoreStr = scoreA + draws/2 === scoreB + draws/2 && scoreA === scoreB && draws === m.games.length
+      ? "½–½" : `${scoreA + draws/2}–${scoreB + draws/2}`;
+
+    // time control from the match tag (e.g. "1s", "2s_vs_1s", "10s")
+    const tc = (m.tag.match(/(\d+s)/g) || []).join(" vs ");
+    // expandable header: just "A vs B  X.X–Y.Y" — no tag duplication
+    const hdr = document.createElement("div"); hdr.className="mhdr";
+    const arr = document.createElement("span"); arr.className="arrow"; arr.textContent="▸";
+    hdr.appendChild(arr);
+    const res_s = document.createElement("span"); res_s.className="mresult";
+    res_s.textContent = `${a} vs ${b}  ${scoreStr}` + (tc ? `  (${tc})` : "");
+    hdr.appendChild(res_s);
+    md.appendChild(hdr);
+    const gamesDiv = document.createElement("div"); gamesDiv.className="games";
+    md.appendChild(gamesDiv);
+
+    // collapsed by default; persist toggle state across re-renders
+    // (the poll recreates the DOM every 4s — the Set survives)
+    if (!window._openMatches) {
+      window._openMatches = new Set();
+      // first load only: open the selected match
+      if (selKey) for (const mm of DATA) if (selKey.startsWith(mm.tag+"#")) _openMatches.add(mm.tag);
     }
+    if (_openMatches.has(m.tag)) md.classList.add("open");
+    hdr.onclick = ()=>{
+      if (md.classList.contains("open")) { md.classList.remove("open"); _openMatches.delete(m.tag); }
+      else { md.classList.add("open"); _openMatches.add(m.tag); }
+    };
+
+    const md_games = gamesDiv;  // game buttons go inside the collapsible
     let prevOpen = null;
     m.games.forEach((g,gi)=>{
       const b = document.createElement("button"); b.className="gbtn";
@@ -161,9 +195,8 @@ function renderSide(){
         prevOpen = openLabel;
       } else prevOpen = null;
       if (keyOf(m,gi)===selKey) b.classList.add("sel");
-      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); renderAll();
-      sweepGame(m, gi, ply); };
-      md.appendChild(b);
+      b.onclick = ()=>{ selKey = keyOf(m,gi); findSel(); ply = m.games[gi].open ? m.games[gi].fens.length-1 : 0; userNav = false; chartWin = null; saveSel(); _openMatches.add(m.tag); renderAll(); };
+      md_games.appendChild(b);
     });
     root.appendChild(md);
   }
@@ -390,171 +423,111 @@ $("analyze").onclick = ()=>{
 };
 
 const GLYPH_PV = {N:"♘",B:"♗",R:"♖",Q:"♕",K:"♔"};
+function pvRow(g, i, cp, moves, color){
+  const row = document.createElement("div");
+  const sc = Math.abs(cp) > 9000
+    ? (cp>0?"M"+(Math.abs(cp)-10000):"-M"+(Math.abs(cp)-10000))
+    : ((cp/100)>=0?"+":"")+(cp/100).toFixed(2);
+  const s1 = document.createElement("span");
+  s1.style.cssText = "display:inline-block;min-width:52px;color:"+color+";font-variant-numeric:tabular-nums;font-weight:600";
+  s1.textContent = sc;
+  row.appendChild(s1);
+  row.appendChild(document.createTextNode("  "));
+  let white = g.fens[i].split(" ")[1] === "w";
+  let moveNo = parseInt(g.fens[i].split(" ")[5], 10) || 1;
+  let firstTok = true;
+  for (const tok of moves.split(" ")){
+    if (white || firstTok){
+      const nspan = document.createElement("span");
+      nspan.style.cssText = "opacity:.6;margin-right:1px";
+      nspan.textContent = white ? (moveNo + ".") : (moveNo + "\u2026");
+      row.appendChild(nspan);
+    }
+    firstTok = false;
+    row.appendChild(document.createTextNode(fmtMove(tok) + " "));
+    if (white) white = false; else { white = true; moveNo += 1; }
+  }
+  return row;
+}
+const DCOL_UI = {12:"#8a919c", 20:"#5aa9e6", 25:"#e0b05a"};
+let top5Key = null, top5Id = 0;
+
+// live top-5 for the CURRENT position only: d12 first, then d20, then d25,
+// each block colored by its chart color. Nothing stored; refetch on ply change.
 function renderPv(){
   const el = $("pvline");
-  el.textContent = "";
-  if (!sel) return;
+  if (!sel){ el.textContent = ""; return; }
   const g = sel.g;
   const i = Math.min(ply, g.fens.length - 1);
   if (!analysisOn){
+    el.textContent = "";
     const b = document.createElement("b");
     b.textContent = "analysis paused";
     el.appendChild(b);
     return;
   }
-  const have = DEPTHS.filter(d => Array.isArray(g["pv_d"+d])).map(d => "d"+d);
-  for (const d of [25,20,12]){
-    const a = g["evals_d"+d], p = g["pv_d"+d];
-    const hasLines = Array.isArray(p) && p[i] && String(p[i]).includes("|");
-    if (!hasLines)
-      continue;
-    const raw = p[i];
-    const b = document.createElement("b");
-    b.textContent = `SF d${d} top-5`;
-    el.appendChild(b);
-    if (raw && raw.includes("|")){
-      for (const line of raw.split(" ;; ").slice(0,5)){
-        const [cp, moves] = line.split("|");
-        const v = parseInt(cp, 10);
-        const sc = Math.abs(v) > 9000
-          ? (v>0?"M"+(Math.abs(v)-10000):"-M"+(Math.abs(v)-10000))
-          : ((v/100)>=0?"+":"")+(v/100).toFixed(2);
-        const row = document.createElement("div");
-        const s1 = document.createElement("span");
-        s1.style.cssText = "display:inline-block;min-width:52px;color:var(--gold);font-variant-numeric:tabular-nums";
-        s1.textContent = sc;
-        row.appendChild(s1);
-        row.appendChild(document.createTextNode(" "));
-        // chess-site style: move number + piece glyph + SAN
-        let white = g.fens[i].split(" ")[1] === "w";
-        let moveNo = parseInt(g.fens[i].split(" ")[5], 10) || 1;
-        let firstTok = true;
-        for (const tok of moves.split(" ")){
-          // number only before white's move, or before black's first move of the line
-          if (white || firstTok){
-            const numTag = white ? (moveNo + ".") : (moveNo + "…");
-            const nspan = document.createElement("span");
-            nspan.style.cssText = "opacity:.6;margin-right:1px";
-            nspan.textContent = numTag;
-            row.appendChild(nspan);
-          }
-          firstTok = false;
-          const gl = GLYPH_PV[tok[0]];
-          if (gl && !tok.startsWith("O-O")){
-            const pc = document.createElement("span");
-            pc.className = white ? "wp" : "bp";
-            pc.style.cssText = "font-size:13px;line-height:1";
-            pc.textContent = gl;
-            row.appendChild(pc);
-            row.appendChild(document.createTextNode(tok.slice(1) + " "));
-          } else {
-            row.appendChild(document.createTextNode(tok + " "));
-          }
-          if (white) white = false; else { white = true; moveNo += 1; }
-        }
-        el.appendChild(row);
+  const key = selKey + "#" + i;
+  if (top5Key === key) return;          // already rendered or running
+  top5Key = key;
+  const myId = ++top5Id;
+  el.textContent = "computing top-5 for this position\u2026";
+  (async () => {
+    const fen = encodeURIComponent(g.fens[i]);
+    // per-depth: fire all three engines concurrently, render each as it
+    // arrives; the next depth replaces the display (only after its own SF
+    // results are in — the fastest engine governs the transition)
+    for (const d of [12, 20, 25]){
+      if (top5Id !== myId) return;
+      const pSF = fetch("/top5?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []}));
+      const pG1 = fetch("/top5g?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []}));
+      const pC16 = fetch("/top5c?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []}));
+      // SF is local and fast — it gates the depth transition
+      const jSF = await pSF;
+      if (top5Id !== myId) return;
+      el.textContent = "";
+      const b = document.createElement("b");
+      b.style.cssText = "color:" + DCOL_UI[d] + ";display:block;margin-top:3px";
+      b.textContent = "SF d" + d + " top-5";
+      el.appendChild(b);
+      for (const [cp, moves] of (jSF.lines || [])){
+        el.appendChild(pvRow(g, i, cp, moves, DCOL_UI[d]));
       }
-    } else {
-      el.appendChild(document.createTextNode(" (lines computing…)"));
+      // general1 and correct16 stream in when ready (same depth block)
+      pG1.then(j2 => {
+        if (top5Id !== myId) return;
+        if (!j2.lines || !j2.lines.length) return;
+        const b2 = document.createElement("b");
+        b2.style.cssText = "color:#7bd88f;display:block;margin-top:4px";
+        b2.textContent = "general2 d" + d + " top-3";
+        el.appendChild(b2);
+        for (const [cp, moves] of j2.lines){
+          el.appendChild(pvRow(g, i, cp, moves, "#7bd88f"));
+        }
+      });
+      pC16.then(j3 => {
+        if (top5Id !== myId) return;
+        if (!j3.lines || !j3.lines.length) return;
+        const b3 = document.createElement("b");
+        b3.style.cssText = "color:#e88f7b;display:block;margin-top:4px";
+        b3.textContent = "correct16 d" + d + " top-3";
+        el.appendChild(b3);
+        for (const [cp, moves] of j3.lines){
+          el.appendChild(pvRow(g, i, cp, moves, "#e88f7b"));
+        }
+      });
     }
-    return;
-  }
-  const b0 = document.createElement("b");
-  b0.textContent = have.length ? `SF17 top-5 (${have.join("/")} done — deeper pending)` : "analysis pending (SF17 sweep running)";
-  el.appendChild(b0);
+  })();
 }
 
 function renderAll(){
-  findSel();
-  if (sel && evalTargetKey === null && selKey !== null) {
-    const m = sel.m, gi = sel.gi;
-    const anyMissing = [12,20,25].some(d => {
-      const a = sel.g["evals_d"+d];
-      return !a || a.some(v => v == null || v === 0);
-    });
-    if (anyMissing) sweepGame(m, gi, ply);
-  }  // resolve sel from selKey before rendering — click must take effect immediately
+  findSel();  // evals are baked server-side (d12_bake.py) — no on-demand fetching here
   for (const f of [renderSide, renderHdr, renderBoard, renderMoves, renderChart, renderPv]){
     try { f(); } catch(e){ console.error(f.name, e); }
   }
 }
 
 
-// On-demand evals: when a game is selected, evaluate d12 for the selected ply
-// first, then remaining plies forward, then from beginning. Then d20, d25.
-const EVALBOX = "http://127.0.0.1:8124";  // Mac Studio local SF17 eval service
-let evalTargetKey = null;  // "tag#gi" of the game being eval'd
-
-async function odEval(fen, depth) {
-  try {
-    const r = await fetch(`${EVALBOX}/eval`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({fen, depth})
-    });
-    const j = await r.json();
-    return j.cp;
-  } catch(e) { return null; }
-}
-
-function evalOrder(g, startPly) {
-  // selected ply first, then forward, then from beginning
-  const n = g.fens.length;
-  const out = [];
-  for (let i = startPly; i < n; i++) out.push(i);
-  for (let i = 0; i < startPly; i++) out.push(i);
-  return out;
-}
-
-async function sweepGame(m, gi, startPly) {
-  const key = keyOf(m, gi);
-  evalTargetKey = key;
-  const fens = m.games[gi].fens;
-  for (const d of [12, 20, 25]) {
-    const ek = "evals_d" + d;
-    // re-resolve the game from DATA each iteration — the poll replaces objects
-    const resolve = () => {
-      for (const mm of DATA) for (let j = 0; j < mm.games.length; j++)
-        if (keyOf(mm, j) === key) return mm.games[j];
-      return null;
-    };
-    let g = resolve();
-    if (!g) { evalTargetKey = null; return; }
-    const arr = g[ek] = g[ek] || [];
-    while (arr.length < fens.length) arr.push(undefined);
-    for (let i = startPly; i < fens.length; i++) {
-      if (evalTargetKey !== key) return;
-      if (arr[i] != null && arr[i] !== 0) continue;
-      const cp = await odEval(fens[i], d);
-      g = resolve();
-      if (!g) { evalTargetKey = null; return; }
-      const a2 = g[ek] = g[ek] || [];
-      while (a2.length < fens.length) a2.push(undefined);
-      if (cp !== null && cp !== undefined && (a2[i] == null || a2[i] === 0)) {
-        a2[i] = cp;
-        arr = a2;   // skip-check must track the live array across poll swaps
-        renderAll();
-      }
-    }
-    for (let i = 0; i < startPly; i++) {
-      if (evalTargetKey !== key) return;
-      if (arr[i] != null && arr[i] !== 0) continue;
-      const cp = await odEval(fens[i], d);
-      g = resolve();
-      if (!g) { evalTargetKey = null; return; }
-      const a2 = g[ek] = g[ek] || [];
-      while (a2.length < fens.length) a2.push(undefined);
-      if (cp !== null && cp !== undefined && (a2[i] == null || a2[i] === 0)) {
-        a2[i] = cp;
-        arr = a2;   // skip-check must track the live array across poll swaps
-        renderAll();
-      }
-    }
-  }
-  evalTargetKey = null;
-}
-
-// chart: click = jump, drag = zoom to range, double-click = reset
+// // chart: click = jump, drag = zoom to range, double-click = reset
 let dragStart = null;
 $("chart").addEventListener("mousedown", e=>{ dragStart = e.clientX; });
 $("chart").addEventListener("mouseup", e=>{
@@ -593,51 +566,6 @@ async function checkPageUpdate(){
   } catch(e) {}
 }
 
-// eval arrays live only in the page: carry them across polls and reloads
-// (keyed by tag#gi) so the 12s refresh never discards computed evals.
-function evalStore(){
-  try { return JSON.parse(localStorage.getItem("flychess.evals") || "{}"); } catch(e){ return {}; }
-}
-function saveEvals(){
-  const st = evalStore();
-  for (const m of DATA) for (let i = 0; i < m.games.length; i++){
-    const g = m.games[i], key = keyOf(m, i), o = st[key] || {};
-    let touched = false;
-    for (const d of DEPTHS){
-      const a = g["evals_d"+d];
-      if (!Array.isArray(a)) continue;
-      const old = Array.isArray(o[d]) ? o[d] : [];
-      let wrote = false;
-      const out = old.slice();
-      for (let k = 0; k < a.length; k++){
-        const v = a[k];
-        if (v != null && v !== 0 && (out[k] == null || out[k] === 0)){ out[k] = v; wrote = true; }
-      }
-      if (wrote || a.length > old.length){ o[d] = out; touched = true; }
-    }
-    if (touched) st[key] = o;
-  }
-  try { localStorage.setItem("flychess.evals", JSON.stringify(st)); } catch(e){}
-}
-function mergeEvals(newData){
-  const st = evalStore();
-  for (const m of newData) for (let i = 0; i < m.games.length; i++){
-    const g = m.games[i], o = st[keyOf(m, i)];
-    if (!o) continue;
-    for (const d of DEPTHS){
-      const saved = o[d];
-      if (!Array.isArray(saved) || !saved.length) continue;
-      const cur = Array.isArray(g["evals_d"+d]) ? g["evals_d"+d] : [];
-      const out = cur.slice();
-      let used = false;
-      for (let k = 0; k < saved.length && k < g.fens.length; k++){
-        if (saved[k] != null && saved[k] !== 0 && (out[k] == null || out[k] === 0)){ out[k] = saved[k]; used = true; }
-      }
-      if (used) g["evals_d"+d] = out;
-    }
-  }
-}
-
 async function poll(){
   try {
     const r = await fetch("/games.json", {cache: "no-store"});
@@ -646,8 +574,6 @@ async function poll(){
     const fp = JSON.stringify(j);
     const changed = fp !== poll.lastFp;
     poll.lastFp = fp;
-    saveEvals();       // persist evals living on the OLD objects first...
-    mergeEvals(j);     // ...then carry them (store + server data) into the fresh JSON
     DATA = j;
     if (!selKey || wasEmpty){
       restoreSel();
@@ -679,7 +605,7 @@ document.addEventListener("keydown",e=>{
 });
 
 poll();
-setInterval(poll, 12000);
+setInterval(poll, 4000);
 </script>
 </body>
 </html>

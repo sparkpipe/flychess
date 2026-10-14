@@ -498,7 +498,7 @@ function renderPv(){
         if (!j2.lines || !j2.lines.length) return;
         const b2 = document.createElement("b");
         b2.style.cssText = "color:#7bd88f;display:block;margin-top:4px";
-        b2.textContent = "general1 d" + d + " top-3";
+        b2.textContent = "general2 d" + d + " top-3";
         el.appendChild(b2);
         for (const [cp, moves] of j2.lines){
           el.appendChild(pvRow(g, i, cp, moves, "#7bd88f"));

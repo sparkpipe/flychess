@@ -499,7 +499,7 @@ function renderPv(){
         if (!j2.lines || !j2.lines.length) return;
         const b2 = document.createElement("b");
         b2.style.cssText = "color:#7bd88f;display:block;margin-top:4px";
-        b2.textContent = "general2 d" + d + " top-3";
+        b2.textContent = "general3 d" + d + " top-3";
         el.appendChild(b2);
         for (const [cp, moves] of j2.lines){
           el.appendChild(pvRow(g, i, cp, moves, "#7bd88f"));
@@ -510,7 +510,7 @@ function renderPv(){
         if (!j3.lines || !j3.lines.length) return;
         const b3 = document.createElement("b");
         b3.style.cssText = "color:#e88f7b;display:block;margin-top:4px";
-        b3.textContent = "correct16 d" + d + " top-3";
+        b3.textContent = "general3B d" + d + " top-3";
         el.appendChild(b3);
         for (const [cp, moves] of j3.lines){
           el.appendChild(pvRow(g, i, cp, moves, "#e88f7b"));

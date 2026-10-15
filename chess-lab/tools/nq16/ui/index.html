@@ -167,8 +167,9 @@ function renderSide(){
     // (the poll recreates the DOM every 4s — the Set survives)
     if (!window._openMatches) {
       window._openMatches = new Set();
-      // first load only: open the selected match
+      // first load only: open the selected match + live game
       if (selKey) for (const mm of DATA) if (selKey.startsWith(mm.tag+"#")) _openMatches.add(mm.tag);
+      for (const mm of DATA) if (mm.tag.startsWith("_live")) _openMatches.add(mm.tag);
     }
     if (_openMatches.has(m.tag)) md.classList.add("open");
     hdr.onclick = ()=>{

@@ -474,9 +474,7 @@ function renderPv(){
   el.textContent = "computing top-5 for this position\u2026";
   (async () => {
     const fen = encodeURIComponent(g.fens[i]);
-    // per-depth: fire all three engines concurrently, render each as it
-    // arrives; the next depth replaces the display (only after its own SF
-    // results are in — the fastest engine governs the transition)
+    let shownDepth = 0;  // track which depth is currently displayed
     for (const d of [12, 20, 25]){
       if (top5Id !== myId) return;
       const pSF = fetch("/top5?fen=" + fen + "&depth=" + d).then(r => r.json()).catch(() => ({lines: []}));
@@ -485,6 +483,7 @@ function renderPv(){
       // SF is local and fast — it gates the depth transition
       const jSF = await pSF;
       if (top5Id !== myId) return;
+      shownDepth = d;
       el.textContent = "";
       const b = document.createElement("b");
       b.style.cssText = "color:" + DCOL_UI[d] + ";display:block;margin-top:3px";
@@ -493,9 +492,9 @@ function renderPv(){
       for (const [cp, moves] of (jSF.lines || [])){
         el.appendChild(pvRow(g, i, cp, moves, DCOL_UI[d]));
       }
-      // general1 and correct16 stream in when ready (same depth block)
+      // general3/3B stream in when ready — only if still on this depth
       pG1.then(j2 => {
-        if (top5Id !== myId) return;
+        if (top5Id !== myId || shownDepth !== d) return;
         if (!j2.lines || !j2.lines.length) return;
         const b2 = document.createElement("b");
         b2.style.cssText = "color:#7bd88f;display:block;margin-top:4px";
@@ -506,7 +505,7 @@ function renderPv(){
         }
       });
       pC16.then(j3 => {
-        if (top5Id !== myId) return;
+        if (top5Id !== myId || shownDepth !== d) return;
         if (!j3.lines || !j3.lines.length) return;
         const b3 = document.createElement("b");
         b3.style.cssText = "color:#e88f7b;display:block;margin-top:4px";

@@ -13,6 +13,7 @@ Usage: aj_worker_resume.py <shard.pgn> <out.jsonl>"""
 import hashlib
 import json
 import os
+import sys
 import subprocess
 import sys
 import time
@@ -21,7 +22,8 @@ import chess
 import chess.pgn
 
 import os
-SF = os.environ.get("SF17", "/mnt/flychess/flychess/src/sf17/src/stockfish")
+SF = os.environ.get("SF17_BIN") or sys.exit(
+    "SF17_BIN not set (sf17 binary used for d10 labeling)")
 
 p = subprocess.Popen([SF], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                      stderr=subprocess.DEVNULL, text=True, bufsize=1)

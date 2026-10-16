@@ -1,35 +1,54 @@
 #!/usr/bin/env python3
-"""general1 top-3 eval service (box, port 8126). The n16 fork binary with
+"""general3 top-3 eval service (port 8126; file name g1eval is historical). The n16 fork binary with
 the general1 net, MultiPV 3. One process, exclusive per request.
 GET /top?fen=<urlencoded>&depth=N -> {"lines": [[cp, "uci pv"], ...]}"""
 import json
+import os
 import subprocess
+import sys
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOCK = threading.Lock()   # one search at a time on the shared process
 
-SF = "/srv/workspace/flychess/src/Stockfish/src/stockfish"
-NET = "/srv/workspace/chess-active/runs-general1/best.nnue"
+CHESS_DATA = os.environ.get("CHESS_DATA") or sys.exit(
+    "CHESS_DATA not set (data root holding runs-*/best.nnue)")
+SF = os.environ.get("FORK_BIN") or sys.exit(
+    "FORK_BIN not set (n16-fork stockfish binary)")
+NET = os.environ.get("NET") or f"{CHESS_DATA}/runs-general3/best.nnue"
+PORT = int(os.environ.get("PORT", "8126"))
 
-p = subprocess.Popen([SF], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                     stderr=subprocess.DEVNULL, text=True, bufsize=1)
-p.stdin.write(f"uci\nsetoption name EvalFile value {NET}\n"
-              "setoption name MultiPV value 3\nisready\n")
-p.stdin.flush()
-while "readyok" not in p.stdout.readline():
-    pass
+def spawn():
+    p = subprocess.Popen([SF], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True, bufsize=1)
+    p.stdin.write(f"uci\nsetoption name EvalFile value {NET}\n"
+                  "setoption name MultiPV value 3\nisready\n")
+    p.stdin.flush()
+    while "readyok" not in p.stdout.readline():
+        pass
+    return p
+
+
+p = spawn()
 
 
 def top(fen, depth):
+    global p
+    if len(fen.split()) < 4:          # not a FEN — the fork terminates on junk
+        return []
     with LOCK:
-        p.stdin.write(f"ucinewgame\nposition fen {fen}\ngo depth {depth}\n")
-        p.stdin.flush()
+        try:
+            p.stdin.write(f"ucinewgame\nposition fen {fen}\ngo depth {depth}\n")
+            p.stdin.flush()
+        except (BrokenPipeError, ValueError):
+            p = spawn()
+            return []
         lines = {}
         while True:
             ln = p.stdout.readline()
             if not ln:
+                p = spawn()           # engine died (bad position) — respawn
                 return []
             if ln.startswith("info") and " multipv " in ln \
                     and " score " in ln and " pv " in ln:
@@ -73,5 +92,5 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("general1 top-3 on 0.0.0.0:8126", flush=True)
-    ThreadingHTTPServer(("0.0.0.0", 8126), H).serve_forever()
+    print(f"general3 top-3 on 0.0.0.0:{PORT}", flush=True)
+    ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()

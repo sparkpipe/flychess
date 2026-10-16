@@ -1,10 +1,13 @@
 #!/bin/bash
 # general1 (2s/move) vs SF8 (1s/move) — standard 6-game match
-FC=/srv/workspace/flychess/src/arena/fastchess-linux-x86-64/fastchess
-GEN=/srv/workspace/flychess/src/Stockfish/src/stockfish
-GENN=/srv/workspace/chess-active/runs-general1/best.nnue
+: "${CHESS_DATA:?CHESS_DATA not set (data root)}"
+: "${FASTCHESS_BIN:?FASTCHESS_BIN not set (fastchess binary)}"
+: "${FORK_BIN:?FORK_BIN not set (n16-fork stockfish)}"
+"$FASTCHESS_BIN"
+"$FORK_BIN"
+GENN=$CHESS_DATA/runs-general1/best.nnue
 SF8=/tmp/sf8src/src/stockfish
-OUT=/srv/workspace/chess-active/matches
+OUT=$CHESS_DATA/matches
 $FC \
   -engine name=general1 cmd=$GEN st=2 option.EvalFile=$GENN \
   -engine name=SF8 cmd=$SF8 st=1 \

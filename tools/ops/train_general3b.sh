@@ -1,9 +1,11 @@
 #!/bin/bash
 # general3B: FRESH net on the same correct d20 data — tests whether
 # general2's warm start biased general3. Separate output dir, same bins.
-cd /srv/workspace/flychess/src/nnue-pytorch
-B=/srv/workspace/chess-active/bins-general3
-R=/srv/workspace/chess-active/runs-general3b
+: "${CHESS_DATA:?CHESS_DATA not set (data root)}"
+cd REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+cd "$REPO/nnue-pytorch"
+B=$CHESS_DATA/bins-general3
+R=$CHESS_DATA/runs-general3b
 mkdir -p $R
 TR=$(( $(stat -c %s $B/general3.train.bin) / 40 ))
 echo "[$(date +%H:%M)] general3B: $TR records, FRESH net (no warm start)"

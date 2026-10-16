@@ -1,21 +1,25 @@
 #!/bin/bash
 # general3B matches: vs general3, general2, SF8, SF17 at 2s/move and depth-20.
-cd /srv/workspace/chess-active
+: "${CHESS_DATA:?CHESS_DATA not set (data root)}"
+: "${FASTCHESS_BIN:?FASTCHESS_BIN not set (fastchess binary)}"
+: "${FORK_BIN:?FORK_BIN not set (n16-fork stockfish)}"
+: "${SF17_BIN:?SF17_BIN not set (sf17 binary)}"
+cd $CHESS_DATA
 # wait for general3B to finish training
 while ! ls runs-general3b/best.nnue > /dev/null 2>&1; do
   sleep 120
 done
 echo "[$(date +%H:%M)] general3B best ready — starting matches"
 
-FC=/srv/workspace/flychess/src/arena/fastchess-linux-x86-64/fastchess
-N16=/srv/workspace/flychess/src/Stockfish/src/stockfish
+"$FASTCHESS_BIN"
+"$FORK_BIN"
 SF8=/tmp/sf8src/src/stockfish
-SF17=/srv/workspace/flychess/src/sf17/src/stockfish
-OUT=/srv/workspace/chess-active/matches
+"$SF17_BIN"
+OUT=$CHESS_DATA/matches
 
-G3B="option.EvalFile=/srv/workspace/chess-active/runs-general3b/best.nnue"
-G3="option.EvalFile=/srv/workspace/chess-active/runs-general3/best.nnue"
-G2="option.EvalFile=/srv/workspace/chess-active/runs-general2/best.nnue"
+G3B="option.EvalFile=$CHESS_DATA/runs-general3b/best.nnue"
+G3="option.EvalFile=$CHESS_DATA/runs-general3/best.nnue"
+G2="option.EvalFile=$CHESS_DATA/runs-general2/best.nnue"
 
 # 2s/move matches
 for OPP in general3 general2 SF8 SF17; do

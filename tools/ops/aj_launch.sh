@@ -1,5 +1,6 @@
 #!/bin/bash
-cd /srv/workspace/chess-active
+: "${CHESS_DATA:?CHESS_DATA not set (data root)}"
+cd $CHESS_DATA
 for i in $(seq 1 16); do
   (
     while true; do

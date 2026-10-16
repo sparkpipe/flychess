@@ -2,9 +2,11 @@
 # general3C: curriculum training d10 -> d11 -> ... -> d20.
 # Each stage runs to PLATEAU (no improvement for 15 validations).
 # Warm from previous stage's last checkpoint.
-cd /srv/workspace/flychess/src/nnue-pytorch
-B=/srv/workspace/chess-active/bins-curriculum
-R=/srv/workspace/chess-active/runs-general3c
+: "${CHESS_DATA:?CHESS_DATA not set (data root holding bins-curriculum/ and runs-general3c/)}"
+REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+cd "$REPO/nnue-pytorch"
+B="$CHESS_DATA/bins-curriculum"
+R="$CHESS_DATA/runs-general3c"
 mkdir -p $R
 PREV_CKPT=""
 for D in 10 11 12 13 14 15 16 17 18 19 20; do

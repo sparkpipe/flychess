@@ -5,13 +5,13 @@
 : "${FORK_BIN:?FORK_BIN not set (n16-fork stockfish)}"
 : "${SF17_BIN:?SF17_BIN not set (sf17 binary)}"
 cd $CHESS_DATA
-"$FASTCHESS_BIN"
-"$FORK_BIN"
-NQ=/mnt/cold-raid6/chess-audit/nq13_binary_backup
-NQN=/mnt/cold-raid6/chess-audit/nets
+FC="$FASTCHESS_BIN"
+N16="$FORK_BIN"
+NQ="$CHESS_DATA/engines/nq13/stockfish"
+NQN="$CHESS_DATA/engines/nq13/nets"
 G3=$CHESS_DATA/runs-general3/best.nnue
-SF8=/tmp/sf8src/src/stockfish
-"$SF17_BIN"
+SF8="$CHESS_DATA/engines/sf8/stockfish"  # rebuild+materialize before use
+SF17="$SF17_BIN"
 ER2=$CHESS_DATA/engine16-correct-r2
 GEN2=$CHESS_DATA/runs-general2/best.nnue
 OUT=$CHESS_DATA/matches
@@ -36,7 +36,7 @@ for ST in 1 10; do
       -engine name=$OPP cmd=$OCMD st=$ST $OOPT \
       -each proto=uci timemargin=200 \
       -rounds 3 -repeat -recover \
-      -openings file=/mnt/cold-raid6/chess-audit/3open.epd format=epd \
+      -openings file="$CHESS_DATA/engines/3open.epd" format=epd \
       -pgnout file=$OUT/general3_vs_${OPP}_${ST}s.pgn \
       2>&1 | tee $OUT/general3_vs_${OPP}_${ST}s.log
     echo "=== general3 vs $OPP ${ST}s: $(grep Points $OUT/general3_vs_${OPP}_${ST}s.log | tail -1) ==="

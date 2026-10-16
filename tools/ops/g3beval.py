@@ -2,13 +2,19 @@
 """general3B top-3 eval service (box, port 8127). Single net, MultiPV 3.
 Same pattern as g1eval (serialized with respawn)."""
 import json
+import os
 import subprocess
+import sys
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-SF = "/mnt/flychess/flychess/src/Stockfish/src/stockfish"
-NET = "/mnt/flychess/chess-active/runs-general3b/best.nnue"
+CHESS_DATA = os.environ.get("CHESS_DATA") or sys.exit(
+    "CHESS_DATA not set (data root holding runs-*/best.nnue)")
+SF = os.environ.get("FORK_BIN") or sys.exit(
+    "FORK_BIN not set (n16-fork stockfish binary)")
+NET = os.environ.get("NET") or f"{CHESS_DATA}/runs-general3b/best.nnue"
+PORT = int(os.environ.get("PORT", "8127"))
 
 LOCK = threading.Lock()
 
@@ -85,5 +91,5 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("general3B top-3 on 0.0.0.0:8127", flush=True)
-    ThreadingHTTPServer(("0.0.0.0", 8127), H).serve_forever()
+    print(f"general3B top-3 on 0.0.0.0:{PORT}", flush=True)
+    ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()

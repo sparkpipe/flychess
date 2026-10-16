@@ -1,5 +1,6 @@
 #!/bin/bash
-cd /srv/workspace/chess-active
+: "${CHESS_DATA:?CHESS_DATA not set (data root)}"
+cd $CHESS_DATA
 for i in $(seq 0 15); do
   P=$(printf "pz.%03d" $i)
   [ -f "puzzle-shards/$P.shard" ] || continue

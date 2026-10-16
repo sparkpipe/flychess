@@ -16,13 +16,35 @@ written before the 2026-10-16 migration hardcode the equivalent
   `cd tools/nnue-pytorch/data_loader/cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j`
   → `build/libtraining_data_loader.so` (never commit build/)
 
+## Environment contract (no hardcoded paths, no magic files)
+
+Every operational script takes its locations from these env vars and
+fails fast with a clear message if missing — zero path literals in code:
+
+| Env | Meaning |
+|---|---|
+| CHESS_DATA | data root: bins-*, runs-*, aj-kept/, store/, matches/ |
+| FORK_BIN | n16-fork Stockfish binary (plays trainer nets) |
+| SF17_BIN | sf17 binary (d10 labeling, reference evals) |
+| FASTCHESS_BIN | fastchess match binary |
+| NET (optional) | per-service net override (defaults: runs-general3[b]/best.nnue) |
+| PORT (optional) | eval service port (defaults 8126 / 8127) |
+
+On rtx5090 the launch prefix is:
+`CHESS_DATA=/mnt/flychess/chess-active FORK_BIN=/mnt/flychess/flychess/src/Stockfish/src/stockfish SF17_BIN=/mnt/flychess/flychess/src/sf17/src/stockfish FASTCHESS_BIN=/mnt/flychess/flychess/src/arena/fastchess-linux-x86-64/fastchess`
+
+Builders take explicit CLI args instead: `--db --out --clean-wins --gambit`
+(the chess-lab pack_expert_bins import resolves relative to the checkout).
+Materialize the gambit file into the data root once:
+`cp /mnt/cold-raid6/chess-audit/gambit_aug_positions.txt $CHESS_DATA/`.
+
 ## Stage 1 — frozen inputs
 
 | Artifact | Size (B) | sha256 |
 |---|---|---|
 | store/games.db (positions + sf17 labels d10–d25) | 117,358,514,176 | (117 GB — hash on demand) |
 | clean_short_wins.json (3,916 games, from find_clean_wins_spec.py) | 805,116 | e879921b156e3f52dec3e67bf33637a5baf562a38747dc51c044f9f3a11144ec |
-| gambit_aug_positions.txt (cold-raid6 archive) | 69,538,983 | 4b50ddfe223e7e12c1d7b472641ef6106a440eef277fa7c29f50ae1ec35efa44 |
+| gambit_aug_positions.txt (materialized into $CHESS_DATA from cold-raid6 archive) | 69,538,983 | 4b50ddfe223e7e12c1d7b472641ef6106a440eef277fa7c29f50ae1ec35efa44 |
 
 Both builders also `sys.path.insert` the chess-lab tools for
 `pack_expert_bins.pack_sfen/pack_move`.
@@ -91,8 +113,7 @@ protocols. Reference anchors: SF8 3223, SF17 ≈ 3470.
   re-training yields statistically equivalent, not byte-identical, nets.
 - Data identity IS byte-exact: verify the bin sha256 table above before
   training; a mismatch means the data stage changed.
-- Builder scripts predate the /mnt migration and hardcode /srv paths
-  internally (DB, chess-lab import, gambit file) — portability fix is a
-  follow-up.
+- Builder scripts take all inputs as CLI args; chess-lab import resolves
+  from the checkout. No path literals remain in tools/ops or the builders.
 - games.db is the product of the dbnet fleet sweeps (tools/dbnet, in repo)
   and the AJ labeling; treat the 117 GB file as the frozen ground truth.

@@ -1,16 +1,20 @@
 #!/bin/bash
 # general3 matches vs all references at 1s, then 10s.
-cd /srv/workspace/chess-active
-FC=/srv/workspace/flychess/src/arena/fastchess-linux-x86-64/fastchess
-N16=/srv/workspace/flychess/src/Stockfish/src/stockfish
+: "${CHESS_DATA:?CHESS_DATA not set (data root)}"
+: "${FASTCHESS_BIN:?FASTCHESS_BIN not set (fastchess binary)}"
+: "${FORK_BIN:?FORK_BIN not set (n16-fork stockfish)}"
+: "${SF17_BIN:?SF17_BIN not set (sf17 binary)}"
+cd $CHESS_DATA
+"$FASTCHESS_BIN"
+"$FORK_BIN"
 NQ=/mnt/cold-raid6/chess-audit/nq13_binary_backup
 NQN=/mnt/cold-raid6/chess-audit/nets
-G3=/srv/workspace/chess-active/runs-general3/best.nnue
+G3=$CHESS_DATA/runs-general3/best.nnue
 SF8=/tmp/sf8src/src/stockfish
-SF17=/srv/workspace/flychess/src/sf17/src/stockfish
-ER2=/srv/workspace/chess-active/engine16-correct-r2
-GEN2=/srv/workspace/chess-active/runs-general2/best.nnue
-OUT=/srv/workspace/chess-active/matches
+"$SF17_BIN"
+ER2=$CHESS_DATA/engine16-correct-r2
+GEN2=$CHESS_DATA/runs-general2/best.nnue
+OUT=$CHESS_DATA/matches
 
 G3F="option.EvalFile=$G3"
 GEN2F="option.EvalFile=$GEN2"

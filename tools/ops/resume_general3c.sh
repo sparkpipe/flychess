@@ -6,13 +6,14 @@
 # Usage: resume_general3c.sh [start-depth]   (default: auto-detect)
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 cd "$REPO/nnue-pytorch"
-B=/mnt/flychess/chess-active/bins-curriculum
-R=/mnt/flychess/chess-active/runs-general3c
+: "${CHESS_DATA:?CHESS_DATA not set (data root holding bins-curriculum/ and runs-general3c/)}"
+B="$CHESS_DATA/bins-curriculum"
+R="$CHESS_DATA/runs-general3c"
 START=${1:-auto}
 if [ "$START" = auto ]; then
   START=20
   for D in 20 19 18 17 16 15 14 13 12 11 10; do
-    [ -f $R/stage_d$D/lightning_logs/version_*/checkpoints/last.ckpt ] && { START=$D; break; }
+    ls $R/stage_d$D/lightning_logs/version_*/checkpoints/last.ckpt >/dev/null 2>&1 && { START=$D; break; }
   done
 fi
 echo "resuming general3C at stage d$START"
@@ -23,7 +24,7 @@ for D in $(seq $START 20); do
   TR=$(( $(stat -c %s $B/d$D/general3c.train.bin) / 40 ))
   VR=$(( $(stat -c %s $B/d$D/general3c.val.bin) / 40 ))
   [ $VR -gt 50000 ] && VR=50000
-  OWN=$(ls $SR/lightning_logs/version_*/checkpoints/last.ckpt 2>/dev/null | head -1)
+  OWN=$(ls -t $SR/lightning_logs/version_*/checkpoints/last.ckpt 2>/dev/null | head -1)
   if [ -n "$OWN" ]; then
     RESUME="--resume-from-checkpoint $OWN"
     echo "[$(date +%H:%M)] stage d$D: CONTINUING from own last.ckpt"

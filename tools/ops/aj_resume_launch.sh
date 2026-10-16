@@ -4,9 +4,11 @@
 #    (aj_worker_resume.py continues each partial out/*.jsonl).
 # 2) N nice'd workers, claim-by-rename, same as aj_launch2.sh.
 # Usage: aj_resume_launch.sh [NW]
+: "${CHESS_DATA:?CHESS_DATA not set (data root holding aj-kept/)}"
+: "${SF17_BIN:?SF17_BIN not set (sf17 binary for d10 labeling)}"
+export SF17_BIN
 OPS="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-DATA=${DATA_DIR:-/mnt/flychess/chess-active}
-cd "$DATA"
+cd "$CHESS_DATA"
 NW=${1:-13}
 for C in aj-kept/aj.*.pgn.claim*; do
   [ -e "$C" ] || continue

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build training bins at every depth from d10 to d20.
 Same positions and sources as general3 — only the label depth changes."""
+import argparse
 import hashlib
 import json
 import os
@@ -8,15 +9,21 @@ import sqlite3
 import struct
 import sys
 
-sys.path.insert(0, "/srv/workspace/flychess/src/chess-lab/tools")
+ap = argparse.ArgumentParser(description=__doc__)
+ap.add_argument("--db", required=True, help="games.db (read-only)")
+ap.add_argument("--out", required=True, help="output dir for d10..d20 bins")
+ap.add_argument("--clean-wins", required=True, help="clean_short_wins.json")
+ap.add_argument("--gambit", required=True, help="gambit_aug_positions.txt")
+args = ap.parse_args()
+DB, BASE = args.db, args.out
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "chess-lab", "tools"))
 import chess
 from pack_expert_bins import pack_sfen, pack_move
 
-DB = "/srv/workspace/chess-active/store/games.db"
-BASE = "/srv/workspace/chess-active/bins-curriculum"
-
 con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-clean = json.load(open("/srv/workspace/chess-active/clean_short_wins.json"))
+clean = json.load(open(args.clean_wins))
 clean_gids = set(g["gid"] for g in clean)
 
 # preload all d10-d20 labels into memory per fen (avoids 11 DB passes)
@@ -30,7 +37,7 @@ print(f"fens with labels: {len(labels):,}", flush=True)
 
 # preload gambit positions
 gambit_fens = []
-for line in open("/mnt/cold-raid6/chess-audit/gambit_aug_positions.txt"):
+for line in open(args.gambit):
     p = line.strip().split("|")
     if p:
         gambit_fens.append(p[0])

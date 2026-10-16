@@ -5,6 +5,7 @@
   - Miniatures: ONLY the 3,916 clean short wins (~75K positions)
   - Gambit winner positions duplicated with d20 labels
 """
+import argparse
 import hashlib
 import json
 import os
@@ -12,12 +13,19 @@ import sqlite3
 import struct
 import sys
 
-sys.path.insert(0, "/srv/workspace/flychess/src/chess-lab/tools")
+ap = argparse.ArgumentParser(description=__doc__)
+ap.add_argument("--db", required=True, help="games.db (read-only)")
+ap.add_argument("--out", required=True, help="output dir for general3 bins")
+ap.add_argument("--clean-wins", required=True, help="clean_short_wins.json")
+ap.add_argument("--gambit", required=True, help="gambit_aug_positions.txt")
+args = ap.parse_args()
+DB, OUT = args.db, args.out
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "chess-lab", "tools"))
 import chess
 from pack_expert_bins import pack_sfen, pack_move
 
-DB = "/srv/workspace/chess-active/store/games.db"
-OUT = "/srv/workspace/chess-active/bins-general3"
 os.makedirs(OUT, exist_ok=True)
 
 files, counts, seen = {}, {}, set()
@@ -50,7 +58,7 @@ def emit(fen, cp, source, dedup=True):
 con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
 
 # clean short win gids (the ONLY miniature games we keep)
-clean = json.load(open("/srv/workspace/chess-active/clean_short_wins.json"))
+clean = json.load(open(args.clean_wins))
 clean_gids = set(g["gid"] for g in clean)
 print(f"clean short win gids: {len(clean_gids):,}")
 
@@ -81,7 +89,7 @@ print(f"clean short wins (d20, full games): {n:,}", flush=True)
 
 # 3: gambit duplication (deliberately NOT deduped)
 n = 0
-for line in open("/mnt/cold-raid6/chess-audit/wp_fit/trainsets/sources/gambit_aug_positions.txt" if False else "/mnt/cold-raid6/chess-audit/gambit_aug_positions.txt"):
+for line in open(args.gambit):
     p = line.strip().split("|")
     if not p:
         continue

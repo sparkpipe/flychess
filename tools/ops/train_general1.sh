@@ -1,9 +1,11 @@
 #!/bin/bash
 # SINGLE GENERAL NET: all 16 experts positions in ONE net (no routing) — baseline vs n16 MoE.
+: "${CHESS_DATA:?CHESS_DATA not set (data root)}"
 set -u
-cd /srv/workspace/flychess/src/nnue-pytorch
-B=/srv/workspace/chess-active/bins-general
-R=/srv/workspace/chess-active/runs-general1
+cd REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+cd "$REPO/nnue-pytorch"
+B=$CHESS_DATA/bins-general
+R=$CHESS_DATA/runs-general1
 mkdir -p $R
 [ -f $R/best.nnue ] && { echo "general1: done"; exit 0; }
 echo "[$(date +%H:%M)] general1: 15.3M recs, fresh net, 6h cap, plateau 40ep"

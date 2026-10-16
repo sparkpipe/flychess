@@ -11,10 +11,10 @@ while ! ls runs-general3b/best.nnue > /dev/null 2>&1; do
 done
 echo "[$(date +%H:%M)] general3B best ready — starting matches"
 
-"$FASTCHESS_BIN"
-"$FORK_BIN"
-SF8=/tmp/sf8src/src/stockfish
-"$SF17_BIN"
+FC="$FASTCHESS_BIN"
+N16="$FORK_BIN"
+SF8="$CHESS_DATA/engines/sf8/stockfish"  # rebuild+materialize before use
+SF17="$SF17_BIN"
 OUT=$CHESS_DATA/matches
 
 G3B="option.EvalFile=$CHESS_DATA/runs-general3b/best.nnue"
@@ -35,7 +35,7 @@ for OPP in general3 general2 SF8 SF17; do
     -engine name=$OPP cmd=$OCMD st=2 $OOPT \
     -each proto=uci timemargin=200 \
     -rounds 3 -repeat -recover \
-    -openings file=/mnt/cold-raid6/chess-audit/3open.epd format=epd \
+    -openings file="$CHESS_DATA/engines/3open.epd" format=epd \
     -pgnout file=$OUT/general3b_vs_${OPP}_2s.pgn \
     2>&1 | tee $OUT/general3b_vs_${OPP}_2s.log
   echo "=== g3B vs $OPP 2s: $(grep Points $OUT/general3b_vs_${OPP}_2s.log | tail -1) ==="
@@ -55,7 +55,7 @@ for OPP in general3 general2 SF8 SF17; do
     -engine name=$OPP cmd=$OCMD depth=20 $OOPT \
     -each proto=uci \
     -rounds 3 -repeat -recover \
-    -openings file=/mnt/cold-raid6/chess-audit/3open.epd format=epd \
+    -openings file="$CHESS_DATA/engines/3open.epd" format=epd \
     -pgnout file=$OUT/general3b_vs_${OPP}_d20.pgn \
     2>&1 | tee $OUT/general3b_vs_${OPP}_d20.log
   echo "=== g3B vs $OPP d20: $(grep Points $OUT/general3b_vs_${OPP}_d20.log | tail -1) ==="

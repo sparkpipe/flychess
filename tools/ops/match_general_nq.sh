@@ -3,11 +3,11 @@
 : "${CHESS_DATA:?CHESS_DATA not set (data root)}"
 : "${FASTCHESS_BIN:?FASTCHESS_BIN not set (fastchess binary)}"
 : "${FORK_BIN:?FORK_BIN not set (n16-fork stockfish)}"
-"$FASTCHESS_BIN"
-"$FORK_BIN"
+FC="$FASTCHESS_BIN"
+GEN="$FORK_BIN"
 GENN=$CHESS_DATA/runs-general1/best.nnue
-NQ=/mnt/cold-raid6/chess-audit/nq13_binary_backup
-NQN=/mnt/cold-raid6/chess-audit/nets
+NQ="$CHESS_DATA/engines/nq13/stockfish"
+NQN="$CHESS_DATA/engines/nq13/nets"
 OUT=$CHESS_DATA/matches
 NQF="option.EvalFile=$NQN/balanced_l0.nnue option.EvalFile2=$NQN/balanced_l1.nnue option.EvalFile3=$NQN/balanced_l2.nnue option.EvalFile4=$NQN/balanced_l3.nnue option.EvalFile5=$NQN/nvb.nnue option.EvalFile6=$NQN/nvr.nnue option.EvalFile7=$NQN/bvr.nnue option.EvalFile8=$NQN/rv2m.nnue option.EvalFile9=$NQN/qvmat.nnue option.EvalFile10=$NQN/oppb.nnue option.EvalFile11=$NQN/dvoretsky.nnue option.EvalFile12=$NQN/exchanges.nnue option.EvalFile13=$NQN/tactics.nnue"
 for ST in 1 10; do
@@ -16,7 +16,7 @@ for ST in 1 10; do
     -engine name=nQ cmd=$NQ st=$ST $NQF \
     -each proto=uci timemargin=200 \
     -rounds 3 -repeat -recover \
-    -openings file=/mnt/cold-raid6/chess-audit/3open.epd format=epd \
+    -openings file="$CHESS_DATA/engines/3open.epd" format=epd \
     -pgnout file=$OUT/general1_vs_nq_${ST}s.pgn \
     2>&1 | tee $OUT/general1_vs_nq_${ST}s.log
 done

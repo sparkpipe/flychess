@@ -1,5 +1,0 @@
-/home/spec/nnue-pytorch/data_loader/cpp/build/CMakeFiles/training_data_loader_report.dir
-/home/spec/nnue-pytorch/data_loader/cpp/build/CMakeFiles/training_data_loader.dir
-/home/spec/nnue-pytorch/data_loader/cpp/build/CMakeFiles/training_data_loader_bench.dir
-/home/spec/nnue-pytorch/data_loader/cpp/build/CMakeFiles/edit_cache.dir
-/home/spec/nnue-pytorch/data_loader/cpp/build/CMakeFiles/rebuild_cache.dir

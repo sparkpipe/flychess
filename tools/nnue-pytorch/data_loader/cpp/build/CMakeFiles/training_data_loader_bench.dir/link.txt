@@ -1,1 +1,0 @@
-/usr/bin/c++ -march=native -Wall -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/training_data_loader_bench.dir/link.d CMakeFiles/training_data_loader_bench.dir/training_data_loader_bench.cpp.o -o training_data_loader_bench  -Wl,-rpath,"\$ORIGIN:/home/spec/nnue-pytorch/data_loader/cpp/build" libtraining_data_loader.so

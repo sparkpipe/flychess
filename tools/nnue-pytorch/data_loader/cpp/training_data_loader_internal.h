@@ -1,0 +1,185 @@
+#pragma once
+
+#include <cstddef>
+#include <vector>
+#include <string>
+#include <memory>
+#include <functional>
+#include <deque>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <thread>
+#include <string_view>
+#include <utility>
+
+#include "lib/parallel_dataloader.h"
+#include "lib/nnue_training_data_stream.h"
+#include "lib/unique_counter.h"
+#include "training_data_loader_structs.h"
+
+struct IFeatureExtractor {
+    virtual ~IFeatureExtractor() = default;
+    virtual int inputs() const = 0;
+    virtual int max_active_features() const = 0;
+    virtual std::pair<int, int> fill_features_sparse(const struct binpack::TrainingDataEntry& e,
+                                                     int* features,
+                                                     chess::Color color) const = 0;
+};
+
+std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name);
+std::function<bool(const struct binpack::TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config);
+
+struct SparseBatch final {
+    static constexpr bool IS_BATCH = true;
+
+    SparseBatch(
+        const IFeatureExtractor& feature_set,
+        const std::vector<struct binpack::TrainingDataEntry>& entries);
+    ~SparseBatch();
+
+    int num_inputs;
+    int size;
+
+    float* is_white;
+    float* outcome;
+    float* score;
+    int    num_active_white_features;
+    int    num_active_black_features;
+    int    max_active_features;
+    int* white;
+    int* black;
+    int* piece_count;
+
+#ifdef NNUE_LOADER_STATISTICS
+    std::vector<struct binpack::TrainingDataEntry> entries_copy;
+#endif
+
+private:
+    float* m_float_block = nullptr;
+    int*   m_int_block = nullptr;
+    void fill_entry(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
+    void fill_features(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
+};
+
+struct AnyStream {
+    virtual ~AnyStream() = default;
+
+    nnue::UniquePositionCounter* unique_counter() { return m_unique_counter.get(); }
+    const nnue::UniquePositionCounter* unique_counter() const { return m_unique_counter.get(); }
+
+protected:
+    // Owned here (not in FeaturedBatchStream/FenBatchStream) so that it is
+    // destroyed AFTER m_stream (C++ base-class destruction order): the
+    // CompressedTrainingDataEntryParallelReader workers, which hold a raw
+    // pointer to the counter, are joined when m_stream is destroyed.
+    std::unique_ptr<nnue::UniquePositionCounter> m_unique_counter;
+};
+
+template<typename StorageT>
+struct Stream: AnyStream {
+    using StorageType = StorageT;
+
+    Stream(int concurrency,
+           const std::vector<std::string>& filenames,
+           bool cyclic,
+           std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
+           nnue::UniquePositionCounter* counter = nullptr,
+           int rank = 0,
+           int world_size = 1) :
+        m_stream(training_data::open_sfen_input_file_parallel(
+          concurrency, filenames, cyclic, skipPredicate, counter, rank, world_size))
+    {
+        if (counter) m_unique_counter.reset(counter);
+    }
+
+    virtual StorageT* next() = 0;
+
+protected:
+    std::unique_ptr<training_data::BasicSfenInputStream> m_stream;
+};
+
+struct FeaturedBatchStream final : Stream<SparseBatch> {
+    using BaseType = Stream<SparseBatch>;
+    static constexpr double worker_thread_ratio = 0.14;
+
+    FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
+                        int concurrency,
+                        const std::vector<std::string>& filenames,
+                        int batch_size,
+                        bool cyclic,
+                        std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
+                        int rank = 0,
+                        int world_size = 1,
+                        nnue::UniquePositionCounter* counter = nullptr);
+    ~FeaturedBatchStream() final;
+
+    SparseBatch* next() override;
+
+private:
+    std::shared_ptr<IFeatureExtractor> m_feature_set;
+    int m_batch_size;
+    int m_concurrency;
+    std::deque<SparseBatch*> m_batches;
+    std::mutex m_batch_mutex;
+    std::condition_variable m_batches_not_full;
+    std::condition_variable m_batches_any;
+    std::atomic_bool m_stop_flag;
+    std::atomic_int m_num_workers;
+    std::vector<std::thread> m_workers;
+
+    static int calculate_num_reader_threads(int concurrency);
+    static int calculate_num_worker_threads(int concurrency);
+};
+
+struct Fen final {
+    Fen();
+    Fen(const std::string& fen);
+    Fen& operator=(const std::string& fen);
+    ~Fen();
+
+private:
+    int m_size;
+    char* m_fen;
+};
+
+struct FenBatch final {
+    FenBatch(const std::vector<struct binpack::TrainingDataEntry>& entries);
+    ~FenBatch();
+
+private:
+    int m_size;
+    Fen* m_fens;
+};
+
+struct FenBatchStream final : Stream<FenBatch> {
+    using BaseType = Stream<FenBatch>;
+    static constexpr double worker_thread_ratio = 0.5;
+
+    FenBatchStream(int concurrency,
+                   const std::vector<std::string>& filenames,
+                   int batch_size,
+                   bool cyclic,
+                   std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
+                   int rank = 0,
+                   int world_size = 1,
+                   nnue::UniquePositionCounter* counter = nullptr);
+    ~FenBatchStream() final;
+
+    FenBatch* next() override;
+
+private:
+    int m_batch_size;
+    int m_concurrency;
+    std::deque<FenBatch*> m_batches;
+    std::mutex m_batch_mutex;
+    std::condition_variable m_batches_not_full;
+    std::condition_variable m_batches_any;
+    std::atomic_bool m_stop_flag;
+    std::atomic_int m_num_workers;
+    std::vector<std::thread> m_workers;
+
+    static int calculate_num_reader_threads(int concurrency);
+    static int calculate_num_worker_threads(int concurrency);
+};
+

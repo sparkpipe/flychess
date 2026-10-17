@@ -11,10 +11,12 @@ REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 R="$CHESS_DATA/runs-general3c"
 ENG="$CHESS_DATA/engines"
 NQ="$ENG/nq13/stockfish"
+SF8="$ENG/sf8/stockfish"
 OPEN="$ENG/3open.epd"
 OUT="$CHESS_DATA/matches"
 mkdir -p "$OUT"
 [ -x "$NQ" ] || { echo "nQ binary missing: $NQ"; exit 1; }
+[ -x "$SF8" ] || { echo "SF8 binary missing: $SF8"; exit 1; }
 [ -f "$OPEN" ] || { echo "openings missing: $OPEN"; exit 1; }
 
 NN="$ENG/nq13/nets"
@@ -38,7 +40,7 @@ EOF
 while true; do
   ALLDONE=1
   for D in 10 11 12 13 14 15 16 17 18 19 20; do
-    [ -f "$OUT/d${D}_vs_nq_d20.pgn" ] && continue
+    [ -f "$OUT/d${D}_vs_nq_d20.pgn" ] && [ -f "$OUT/d${D}_vs_sf8_d20.pgn" ] && continue
     ALLDONE=0
     SR="$R/stage_d$D"
     if [ "$D" -lt 20 ]; then
@@ -54,19 +56,22 @@ while true; do
         || { echo "d$D serialize FAILED"; continue; }
     fi
     NET="option.EvalFile=$SR/best.nnue"
-    for PROTO in 2s d20; do
-      [ -f "$OUT/d${D}_vs_nq_${PROTO}.pgn" ] && continue
-      if [ "$PROTO" = 2s ]; then TC="st=2"; EACH="proto=uci timemargin=200"; else TC="depth=20"; EACH="proto=uci"; fi
-      rm -f "$OUT/d${D}_vs_nq_${PROTO}.pgn"
-      echo "[$(date +%H:%M)] d$D vs nQ $PROTO — match starting"
-      "$FASTCHESS_BIN" \
-        -engine name=d$D cmd="$FORK_BIN" $TC $NET \
-        -engine name=nQ cmd="$NQ" $TC $NQF \
-        -each $EACH -rounds 3 -repeat -recover \
-        -openings file="$OPEN" format=epd \
-        -pgnout file="$OUT/d${D}_vs_nq_${PROTO}.pgn" \
-        2>&1 | tee "$OUT/d${D}_vs_nq_${PROTO}.log" | grep -E "Points|Score of" | tail -2
-      echo "=== d$D vs nQ $PROTO: $(grep Points "$OUT/d${D}_vs_nq_${PROTO}.log" | tail -1) ==="
+    for OPP in nq sf8; do
+      if [ "$OPP" = nq ]; then ONAME=nQ; OCMD="$NQ"; OOPT="$NQF"; else ONAME=SF8; OCMD="$SF8"; OOPT=""; fi
+      for PROTO in 2s d20; do
+        [ -f "$OUT/d${D}_vs_${OPP}_${PROTO}.pgn" ] && continue
+        if [ "$PROTO" = 2s ]; then TC="st=2"; EACH="proto=uci timemargin=200"; else TC="depth=20"; EACH="proto=uci"; fi
+        rm -f "$OUT/d${D}_vs_${OPP}_${PROTO}.pgn"
+        echo "[$(date +%H:%M)] d$D vs $ONAME $PROTO — match starting"
+        "$FASTCHESS_BIN" \
+          -engine name=d$D cmd="$FORK_BIN" $TC $NET \
+          -engine name=$ONAME cmd="$OCMD" $TC $OOPT \
+          -each $EACH -rounds 3 -repeat -recover \
+          -openings file="$OPEN" format=epd \
+          -pgnout file="$OUT/d${D}_vs_${OPP}_${PROTO}.pgn" \
+          2>&1 | tee "$OUT/d${D}_vs_${OPP}_${PROTO}.log" | grep -E "Points|Score of" | tail -2
+        echo "=== d$D vs $ONAME $PROTO: $(grep Points "$OUT/d${D}_vs_${OPP}_${PROTO}.log" | tail -1) ==="
+      done
     done
   done
   [ "$ALLDONE" = 1 ] && { echo "[$(date +%H:%M)] all curriculum nQ matches DONE"; exit 0; }

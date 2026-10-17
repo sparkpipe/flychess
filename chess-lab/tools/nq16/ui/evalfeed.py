@@ -62,8 +62,24 @@ for _ in range(POOL):
 EXE = concurrent.futures.ThreadPoolExecutor(POOL)
 
 
+def arm(p, seconds):
+    """Kill a hung engine after `seconds`; the existing EOF path respawns."""
+    t = threading.Timer(seconds, lambda: _kill(p))
+    t.daemon = True
+    t.start()
+    return t
+
+
+def _kill(p):
+    try:
+        p.kill()
+    except Exception:
+        pass
+
+
 def search(fen, depth):
     p = pool.get()
+    dog = arm(p, 180)
     try:
         p.stdin.write(f"ucinewgame\nposition fen {fen}\ngo depth {depth}\n")
         p.stdin.flush()
@@ -90,13 +106,11 @@ def search(fen, depth):
             elif line.startswith("bestmove"):
                 return cp, pv
     except Exception:
-        try:
-            p.kill()
-        except Exception:
-            pass
+        _kill(p)
         p = spawn()
         return None, ""
     finally:
+        dog.cancel()
         pool.put(p)
 
 
@@ -257,6 +271,8 @@ def loop():
             focus = load_json(f"{HOME}/focus.json", {})
             ft, fg = focus.get("tag"), focus.get("gi")
 
+            emit()          # games appear immediately, evals deepen later
+
             def emit():
                 for m in doc:
                     side = sides.get(m["name"], {})
@@ -316,6 +332,7 @@ def top5(fen, depth):
     if key in TOP5_CACHE:
         return TOP5_CACHE[key]
     p = pool.get()
+    dog = arm(p, 180)
     lines = {}
     try:
         try:
@@ -345,17 +362,20 @@ def top5(fen, depth):
                 elif ln.startswith("bestmove"):
                     break
         finally:
-            p.stdin.write("setoption name MultiPV value 1\nisready\n")
-            p.stdin.flush()
-            while "readyok" not in p.stdout.readline():
+            try:
+                p.stdin.write("setoption name MultiPV value 1\nisready\n")
+                p.stdin.flush()
+                for _ in range(50):
+                    ln = p.stdout.readline()
+                    if not ln or "readyok" in ln:
+                        break
+            except Exception:
                 pass
     except Exception:
-        try:
-            p.kill()
-        except Exception:
-            pass
+        _kill(p)
         p = spawn()
     finally:
+        dog.cancel()
         pool.put(p)
     out = [lines[k] for k in sorted(lines)][:5]
     if len(TOP5_CACHE) > 400:

@@ -82,6 +82,12 @@ def main():
                     help="EMA weight of new eval (0.1 = 0.9*old + 0.1*new);"
                          " 0 disables smoothing")
     ap.add_argument("--ema-scope", choices=["segments", "all"], default="all")
+    ap.add_argument("--bar", type=float, default=0.70,
+                    help="smooth-rise win-probability bar (default 0.70)")
+    ap.add_argument("--require-final", action="store_true",
+                    help="smooth-rise: game must END still won (final "
+                         "smoothed eval >= bar) — excludes forfeit-style "
+                         "endings at modest evals")
     ap.add_argument("--profile", choices=["standard", "smooth-rise"],
                     default="standard",
                     help="smooth-rise: EMA path from game start to first "
@@ -134,7 +140,7 @@ def main():
                     e = 0.9 * e + 0.1 * v
                     sm2.append(e)
                 t = next((i for i, v in enumerate(sm2)
-                          if wp_of(v) >= 0.70), None)
+                          if wp_of(v) >= a.bar), None)
                 if t is None:
                     rise_never70 += 1
                     seg = set()
@@ -143,6 +149,9 @@ def main():
                     seg = set()
                 elif any(abs(b - c) >= 120 for b, c in zip(wseq[:t + 1], wseq[1:t + 1])):
                     rise_blocked_jump += 1
+                    seg = set()
+                elif a.require_final and wp_of(sm2[-1]) < a.bar:
+                    rise_blocked_jump += 1000000  # counted as ended-not-won
                     seg = set()
                 else:
                     rise_games += 1
@@ -179,8 +188,10 @@ def main():
         print(f"smooth-rise games: {rise_games:,} "
               f"({100*rise_games/dec:.2f}% of decisive, "
               f"{100*rise_games/max(read,1):.2f}% of all)")
-        print(f"  never reached 70%: {rise_never70:,}; <10 plies: {rise_too_short:,}; "
-              f"raw jump en route: {rise_blocked_jump:,}")
+        ended_not_won = rise_blocked_jump // 1000000
+        print(f"  never reached bar: {rise_never70:,}; <10 plies: {rise_too_short:,}; "
+              f"raw jump en route: {rise_blocked_jump % 1000000:,}; "
+              f"ended below bar: {ended_not_won:,}")
         if rl:
             print(f"  rise length plies: median {rl[len(rl)//2]}, "
                   f"mean {sum(rl)/len(rl):.1f}, p90 {rl[int(len(rl)*0.9)]}")

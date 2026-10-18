@@ -40,12 +40,15 @@ def band(wp):
     return "win"
 
 
-def seg_positions(wseq):
-    """Indices of plies inside band-transition segments (extractor v2)."""
+def seg_positions(wseq, raw=None):
+    """Indices of plies inside band-transition segments (extractor v2).
+    Bands always read wseq; blunder splits read raw if given (EMA mode:
+    bands see smoothed evals, splits stay raw-event detectors)."""
+    raw = raw if raw is not None else wseq
     segs = []
     cur = [0]
     for i in range(1, len(wseq)):
-        if abs(wseq[i] - wseq[i - 1]) >= 120:
+        if abs(raw[i] - raw[i - 1]) >= 120:
             segs.append(cur)
             cur = []
         cur.append(i)
@@ -75,9 +78,22 @@ def main():
     ap.add_argument("--out", required=True, help="aj-kept/out dir with jsonl")
     ap.add_argument("--shards", default="000,001")
     ap.add_argument("--max-games", type=int, default=0)
+    ap.add_argument("--ema", type=float, default=0.0,
+                    help="EMA weight of new eval (0.1 = 0.9*old + 0.1*new);"
+                         " 0 disables smoothing")
+    ap.add_argument("--ema-scope", choices=["segments", "all"], default="all")
+    ap.add_argument("--profile", choices=["standard", "smooth-rise"],
+                    default="standard",
+                    help="smooth-rise: EMA path from game start to first "
+                         "wp>=0.70 with no raw >=120cp jump en route; the "
+                         "kept segment is start..that ply (strong "
+                         "positional game profile)")
     a = ap.parse_args()
 
     games = read = draws = kept_seg_games = kept_seg_pos = 0
+    rise_games = 0
+    rise_lens = []
+    rise_blocked_jump = rise_never70 = rise_too_short = 0
     kept_mini_games = kept_mini_pos = union_pos = 0
     band_counts = {}
     plies_total = 0
@@ -101,21 +117,53 @@ def main():
             wseq = [v if r == "1-0" else -v for v in g["e"]]
             games += 1
             plies_total += len(wseq)
-            seg = seg_positions(wseq)
+            if a.ema > 0:
+                sm, e = [], wseq[0]
+                for v in wseq:
+                    e = (1 - a.ema) * e + a.ema * v
+                    sm.append(e)
+                seg_in = sm
+                mini_in = sm if a.ema_scope == "all" else wseq
+            else:
+                seg_in, mini_in = wseq, wseq
+            if a.profile == "smooth-rise":
+                # winner-pov EMA; first ply reaching wp>=0.70; path must be
+                # free of raw >=120cp swings; segment = start..that ply
+                sm2, e = [], wseq[0]
+                for v in wseq:
+                    e = 0.9 * e + 0.1 * v
+                    sm2.append(e)
+                t = next((i for i, v in enumerate(sm2)
+                          if wp_of(v) >= 0.70), None)
+                if t is None:
+                    rise_never70 += 1
+                    seg = set()
+                elif t < 10:
+                    rise_too_short += 1
+                    seg = set()
+                elif any(abs(b - c) >= 120 for b, c in zip(wseq[:t + 1], wseq[1:t + 1])):
+                    rise_blocked_jump += 1
+                    seg = set()
+                else:
+                    rise_games += 1
+                    rise_lens.append(t + 1)
+                    seg = set(range(t + 1))
+            else:
+                seg = seg_positions(seg_in, raw=wseq)
             if seg:
                 kept_seg_games += 1
                 kept_seg_pos += len(seg)
-            if is_clean_short_win(wseq):
+            if is_clean_short_win(mini_in):
                 kept_mini_games += 1
                 kept_mini_pos += len(wseq)
-            u = seg | (set(range(len(wseq))) if is_clean_short_win(wseq) else set())
+            u = seg | (set(range(len(wseq))) if is_clean_short_win(mini_in) else set())
             union_pos += len(u)
             for i in seg:
-                b = band(wp_of(wseq[i]))
+                b = band(wp_of(seg_in[i]))
                 band_counts[b] = band_counts.get(b, 0) + 1
 
     dec = games or 1
-    print(f"games read: {read:,} (malformed lines skipped: {bad}, "
+    print(f"[ema={a.ema or 'off'} scope={a.ema_scope}] games read: {read:,} (malformed lines skipped: {bad}, "
           f"draws/non-decisive {draws:,}, decisive {dec:,})")
     print(f"segment-games: {kept_seg_games:,} ({100*kept_seg_games/dec:.1f}% of decisive)"
           f"  positions: {kept_seg_pos:,} ({100*kept_seg_pos/(plies_total or 1):.1f}% of plies)")
@@ -126,6 +174,18 @@ def main():
           f"{100*union_pos/(read and sum(1 for _ in ()) or read) if False else ''}"
           f"{100*union_pos/(plies_total*read/max(read,1) or 1):.1f}% basis plies)")
     print("segment band mix:", {k: f"{v:,}" for k, v in sorted(band_counts.items())})
+    if a.profile == "smooth-rise":
+        rl = sorted(rise_lens)
+        print(f"smooth-rise games: {rise_games:,} "
+              f"({100*rise_games/dec:.2f}% of decisive, "
+              f"{100*rise_games/max(read,1):.2f}% of all)")
+        print(f"  never reached 70%: {rise_never70:,}; <10 plies: {rise_too_short:,}; "
+              f"raw jump en route: {rise_blocked_jump:,}")
+        if rl:
+            print(f"  rise length plies: median {rl[len(rl)//2]}, "
+                  f"mean {sum(rl)/len(rl):.1f}, p90 {rl[int(len(rl)*0.9)]}")
+            est = sum(rl) / max(dec, 1) * 6_175_677 * dec / max(read, 1)
+            print(f"  extrapolated positions: ~{est/1e6:.1f}M")
     per_game = union_pos / max(dec, 1)
     dec_frac = dec / max(read, 1)
     print(f"per-decisive-game retained positions (mean): {per_game:.1f}")

@@ -82,10 +82,15 @@ def main():
     band_counts = {}
     plies_total = 0
 
+    bad = 0
     for sh in a.shards.split(","):
         path = os.path.join(a.out, f"aj.{sh}.jsonl")
         for line in open(path):
-            g = json.loads(line)
+            try:
+                g = json.loads(line)
+            except json.JSONDecodeError:
+                bad += 1
+                continue
             read += 1
             if a.max_games and read > a.max_games:
                 break
@@ -110,7 +115,8 @@ def main():
                 band_counts[b] = band_counts.get(b, 0) + 1
 
     dec = games or 1
-    print(f"games read: {read:,} (draws/non-decisive {draws:,}, decisive {dec:,})")
+    print(f"games read: {read:,} (malformed lines skipped: {bad}, "
+          f"draws/non-decisive {draws:,}, decisive {dec:,})")
     print(f"segment-games: {kept_seg_games:,} ({100*kept_seg_games/dec:.1f}% of decisive)"
           f"  positions: {kept_seg_pos:,} ({100*kept_seg_pos/(plies_total or 1):.1f}% of plies)")
     print(f"clean-short-wins: {kept_mini_games:,} ({100*kept_mini_games/dec:.2f}% of decisive)"

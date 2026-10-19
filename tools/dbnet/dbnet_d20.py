@@ -56,7 +56,7 @@ def next_batch(n):
             if KIND:
                 params = ("sf17", cursor, KIND, n - len(items))
             rows = con.execute(q, params).fetchall()
-if rows:
+            if rows:
                 items += [{"i": s, "fen": f} for s, f in rows]
                 cursor = rows[-1][0]
             elif cursor > 0:

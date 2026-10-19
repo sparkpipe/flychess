@@ -271,8 +271,6 @@ def loop():
             focus = load_json(f"{HOME}/focus.json", {})
             ft, fg = focus.get("tag"), focus.get("gi")
 
-            emit()          # games appear immediately, evals deepen later
-
             def emit():
                 for m in doc:
                     side = sides.get(m["name"], {})
@@ -286,6 +284,7 @@ def loop():
                                 for f in g["fens"]]
                 atomic_json(doc, f"{HOME}/games.json")
 
+            emit()          # games appear immediately, evals deepen later
             # 1. d12 gaps everywhere (fast, always first)
             for m in doc:
                 side = sides[m["name"]]

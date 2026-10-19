@@ -8,11 +8,13 @@ POST /result    {"rows": [{"i", "fen", "depth", "cp"}, ...]}  -> fraction-of-a-m
 A mutex serializes cursor + writes. No leases, no lockfiles.
 Cursor persists to meta every 5000 handouts so a restart skips ahead."""
 import json
+import os
 import sqlite3
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+KIND = os.environ.get("SWEEP_KIND", "")
 DB = "/srv/workspace/chess-active/store/games.db"
 CURSOR_KEY = "d20_cursor"
 SAVE_EVERY = 5000
@@ -44,13 +46,17 @@ def next_batch(n):
             return [], True
         items = []
         while len(items) < n:
-            rows = con.execute(
-                "select p.seq, p.fen from positions p"
-                " left join labels l on l.fen = p.fen"
-                "   and l.engine=? and l.depth=20"
-                " where p.seq > ? and l.fen is null order by p.seq limit ?",
-                ("sf17", cursor, n - len(items))).fetchall()
-            if rows:
+            q = ("select p.seq, p.fen from positions p"
+                 " left join labels l on l.fen = p.fen"
+                 "   and l.engine=? and l.depth=20"
+                 " where p.seq > ? and l.fen is null"
+                 + (" and p.kind=?" if KIND else "")
+                 + " order by p.seq limit ?")
+            params = ("sf17", cursor, n - len(items))
+            if KIND:
+                params = ("sf17", cursor, KIND, n - len(items))
+            rows = con.execute(q, params).fetchall()
+if rows:
                 items += [{"i": s, "fen": f} for s, f in rows]
                 cursor = rows[-1][0]
             elif cursor > 0:

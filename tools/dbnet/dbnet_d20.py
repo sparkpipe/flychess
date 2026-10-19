@@ -15,7 +15,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 KIND = os.environ.get("SWEEP_KIND", "")
-DB = "/srv/workspace/chess-active/store/games.db"
+DB = os.environ.get("CHESS_DATA", "") + "/store/games.db"
+assert DB != "/store/games.db", "CHESS_DATA not set (data root with store/games.db)"
 CURSOR_KEY = "d20_cursor"
 SAVE_EVERY = 5000
 

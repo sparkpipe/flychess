@@ -162,7 +162,7 @@ def main():
                 k.kill()
                 kids[i] = Child()
         if now - last_print > 30:
-            print(f"{time.strftime("%H:%M:%S")} pos={n_pos:,} rows={n_rows:,} "
+            print(f"{time.strftime('%H:%M:%S')} pos={n_pos:,} rows={n_rows:,} "
                   f"buf={len(pending):,} done_flag={done_flag}", flush=True)
             last_print = now
     print(f"{NODE} SWEEP DONE pos={n_pos:,} rows={n_rows:,}", flush=True)

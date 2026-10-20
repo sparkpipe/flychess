@@ -4,7 +4,7 @@
 set -u
 SRC=/home/spec/chess-lab/otb_complete_dump.txt
 STAGE=/home/spec/chess-lab/eval_shards
-NODES="spark1 spark2 spark3 spark4 spark5 spark6 spark7 spark8 sparka sparkb sparkc sparkd sparke sparkf"
+NODES="lenovo7 lenovo8"   # dedicated flychess machines (GB10); spark* are production — do not use
 
 mkdir -p "$STAGE"
 if [ ! -f "$STAGE/shard_00.done" ]; then

@@ -7,8 +7,8 @@
 set -u
 
 MINUTES=${1:-60}
-NODES="spark1 spark2 spark3 spark4 spark5 spark6 spark7 spark8 sparka sparkb sparkc sparkd sparke sparkf"
-# spark9 = controller standby; adjust if topology differs
+NODES="lenovo7 lenovo8"   # dedicated flychess machines (GB10); spark* are production — do not use
+# lenovo7/lenovo8 are the only flychess compute nodes (2026-10-20 ruling)
 WORKERS_PER_NODE=8
 GAMES_PER_CHUNK=500
 DEPTH=${DEPTH:-10}

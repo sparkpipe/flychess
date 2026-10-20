@@ -4,7 +4,7 @@
 # Usage: bash launch_fleet.sh [minutes]
 set -u
 MINUTES=${1:-60}
-NODES="spark1 spark2 spark3 spark4 spark5 spark6 spark7 spark8 sparka sparkb sparkc sparkd sparke sparkf"
+NODES="lenovo7 lenovo8"   # dedicated flychess machines (GB10); spark* are production — do not use
 WORKERS=8
 DEPTH=10
 STAGE=/home/spark2/extnvme/phase-moe

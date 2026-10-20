@@ -4,7 +4,7 @@
 # selection). Marker-based. Also assembles tactics.bin eval inputs.
 set -u
 R=/mnt/cold-raid6/chess-audit
-NODES="spark1 spark2 spark3 spark4 spark5 spark6 spark7 spark8 sparka sparkb sparkc sparkd sparke sparkf"
+NODES="lenovo7 lenovo8"   # dedicated flychess machines (GB10); spark* are production — do not use
 LOG="$R/chain_both.log"
 exec >> "$LOG" 2>&1
 echo "=== both-chain armed $(date -u) ==="

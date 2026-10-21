@@ -4,7 +4,7 @@
 set -u
 SRC=/mnt/cold-raid6/chess-audit/otb_complete_dump_both.txt
 STAGE=/mnt/cold-raid6/chess-audit/both_shards
-NODES="lenovo7 lenovo8"   # dedicated flychess machines (GB10); spark* are production — do not use
+NODES="lenovo7 lenovo8 lenovo9"   # dedicated flychess machines (GB10); spark* are production — do not use
 
 mkdir -p "$STAGE"
 if [ ! -f "$STAGE/shard_00" ] || [ "$(wc -l < "$STAGE/shard_00")" -lt 1000 ]; then

@@ -7,7 +7,7 @@
 set -u
 
 MINUTES=${1:-60}
-NODES="lenovo7 lenovo8"   # dedicated flychess machines (GB10); spark* are production — do not use
+NODES="lenovo7 lenovo8 lenovo9"   # dedicated flychess machines (GB10); spark* are production — do not use
 # lenovo7/lenovo8 are the only flychess compute nodes (2026-10-20 ruling)
 WORKERS_PER_NODE=8
 GAMES_PER_CHUNK=500

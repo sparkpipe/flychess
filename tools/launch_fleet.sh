@@ -4,7 +4,7 @@
 # Usage: bash launch_fleet.sh [minutes]
 set -u
 MINUTES=${1:-60}
-NODES="lenovo7 lenovo8"   # dedicated flychess machines (GB10); spark* are production — do not use
+NODES="lenovo7 lenovo8 lenovo9"   # dedicated flychess machines (GB10); spark* are production — do not use
 WORKERS=8
 DEPTH=10
 STAGE=/home/spark2/extnvme/phase-moe

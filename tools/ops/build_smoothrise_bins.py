@@ -15,8 +15,9 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "..", "chess-lab", "tools"))
+for _p in ("chess-lab/tools", "tools"):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "..", _p))
 import chess
 from pack_expert_bins import pack_sfen, pack_move
 

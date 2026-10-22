@@ -213,6 +213,10 @@ def atomic_json(obj, path):
     os.replace(tmp, path)
 
 
+FAILS = {}          # (fen, depth) -> consecutive failures
+MAX_FAILS = 3       # then mark exhausted; gaps() skips it forever
+
+
 def run_batch(pairs, side):
     """Evaluate (fen, depth) pairs in parallel, merging into the sidecar."""
     def work(fd):
@@ -221,7 +225,11 @@ def run_batch(pairs, side):
         return fd, cp, pv
     for (fen, depth), cp, pv in EXE.map(work, pairs):
         if cp is None:
+            FAILS[(fen, depth)] = FAILS.get((fen, depth), 0) + 1
+            if FAILS[(fen, depth)] >= MAX_FAILS:
+                side.setdefault(fen, {})[f"{depth}x"] = 1
             continue
+        FAILS.pop((fen, depth), None)
         e = side.setdefault(fen, {})
         e[str(depth)] = cp
         e[f"{depth}pv"] = f"{cp}|{pv}" if pv else "|"
@@ -236,6 +244,8 @@ def gaps(side, games, depth, skip=None):
             e = side.get(fen)
             if e and str(depth) in e and f"{depth}pv" in e:
                 continue
+            if e and f"{depth}x" in e:
+                continue          # exhausted after MAX_FAILS — stop retrying
             out.append((fen, depth))
     return out
 

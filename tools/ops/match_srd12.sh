@@ -28,16 +28,16 @@ for OPP in general3 general3b SF8 SF17; do
     SF8)      OCMD=$SF8;   OOPT="" ;;
     SF17)     OCMD=$SF17;  OOPT="" ;;
   esac
-  rm -f $OUT/general3c_vs_${OPP}_2s.pgn
+  rm -f $OUT/${NAME}_vs_${OPP}_2s.pgn
   $FC \
     -engine name=sr_d12 cmd=$N16 st=2 $SRD12 \
     -engine name=$OPP cmd=$OCMD st=2 $OOPT \
     -each proto=uci timemargin=200 \
     -rounds 3 -repeat -recover \
     -openings file="$CHESS_DATA/engines/3open.epd" format=epd \
-    -pgnout file=$OUT/general3c_vs_${OPP}_2s.pgn \
-    2>&1 | tee $OUT/general3c_vs_${OPP}_2s.log
-  echo "=== g3C vs $OPP 2s: $(grep Points $OUT/general3c_vs_${OPP}_2s.log | tail -1) ==="
+    -pgnout file=$OUT/${NAME}_vs_${OPP}_2s.pgn \
+    2>&1 | tee $OUT/${NAME}_vs_${OPP}_2s.log
+  echo "=== g3C vs $OPP 2s: $(grep Points $OUT/${NAME}_vs_${OPP}_2s.log | tail -1) ==="
 done
 
 # depth-20 matches
@@ -48,15 +48,15 @@ for OPP in general3 general3b SF8 SF17; do
     SF8)      OCMD=$SF8;   OOPT="" ;;
     SF17)     OCMD=$SF17;  OOPT="" ;;
   esac
-  rm -f $OUT/general3c_vs_${OPP}_d20.pgn
+  rm -f $OUT/${NAME}_vs_${OPP}_d20.pgn
   $FC \
     -engine name=sr_d12 cmd=$N16 depth=20 $SRD12 \
     -engine name=$OPP cmd=$OCMD depth=20 $OOPT \
     -each proto=uci \
     -rounds 3 -repeat -recover \
     -openings file="$CHESS_DATA/engines/3open.epd" format=epd \
-    -pgnout file=$OUT/general3c_vs_${OPP}_d20.pgn \
-    2>&1 | tee $OUT/general3c_vs_${OPP}_d20.log
-  echo "=== g3C vs $OPP d20: $(grep Points $OUT/general3c_vs_${OPP}_d20.log | tail -1) ==="
+    -pgnout file=$OUT/${NAME}_vs_${OPP}_d20.pgn \
+    2>&1 | tee $OUT/${NAME}_vs_${OPP}_d20.log
+  echo "=== g3C vs $OPP d20: $(grep Points $OUT/${NAME}_vs_${OPP}_d20.log | tail -1) ==="
 done
 echo ALL-SRD12-MATCHES-DONE

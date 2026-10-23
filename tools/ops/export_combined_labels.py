@@ -30,7 +30,7 @@ else:
             "select p.fen, p.kind, l12.cp, l20.cp from positions p"
             " join labels l12 on l12.fen = p.fen and l12.engine='sf17' and l12.depth=12"
             " join labels l20 on l20.fen = p.fen and l20.engine='sf17' and l20.depth=20"
-            " where p.kind in ('otb_seg','puzzle','gambit','aj_sr')"):
+            " where p.kind in ('otb_seg','puzzle','gambit','aj_sr','fill')"):
         out.write(f"{kind}\t{fen}\t{c12}\t{c20}\n")
         n += 1
         if n % 4000000 == 0:

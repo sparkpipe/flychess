@@ -70,7 +70,24 @@ EOF
   echo "  d$D done: best corr $BEST @e$BEST_EP"
 }
 
-run_phase 12 ""
+if [ "${SKIP_D12:-0}" = 1 ]; then
+  BEST_CK=$(python3 << 'EOF'
+import glob, re, zipfile
+cks = glob.glob("$RUN_DIR/stage_d12/lightning_logs/version_*/checkpoints/epoch=*.ckpt")
+def ep(f):
+    m = re.search(r"epoch=(\d+)", f); return int(m.group(1)) if m else -1
+cks.sort(key=ep, reverse=True)
+for c in cks:
+    try:
+        zipfile.ZipFile(c).namelist(); print(c); break
+    except: continue
+EOF
+)
+  [ -z "$BEST_CK" ] && { echo "SKIP_D12: no d12 ckpt"; exit 1; }
+  echo "SKIP_D12=1 — phase 2 from $(basename "$BEST_CK")"
+else
+  run_phase 12 ""
+fi
 run_phase 20 "$BEST_CK"
 python3 serialize.py "$BEST_CK" "$RUN_DIR/best.nnue" >/dev/null 2>&1
 echo "[$(date +%H:%M)] smoothrise net DONE -> $RUN_DIR/best.nnue"

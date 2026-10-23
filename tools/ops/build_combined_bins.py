@@ -67,7 +67,7 @@ def main():
     n = 0
     for line in open(a.pos):
         kind, fen, c12, c20 = line.rstrip("\n").split("\t")
-        if kind == "gambit":
+        if kind in ("gambit", "fill"):
             gambit_cp[fen] = (c12, c20)
         n += 1
         if n % 4000000 == 0:
@@ -79,8 +79,8 @@ def main():
     pos = open(a.pos)
     for line in pos:
         kind, fen, c12, c20 = line.rstrip("\n").split("\t")
-        if kind == "gambit":
-            continue
+        if kind in ("gambit", "fill"):
+            continue          # fill flows via plies/gambit-file paths
         stats[emit(fen, c12, c20, kind)] += 1
         n += 1
         if n % 4000000 == 0:

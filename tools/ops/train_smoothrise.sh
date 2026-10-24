@@ -71,7 +71,7 @@ EOF
 }
 
 if [ "${SKIP_D12:-0}" = 1 ]; then
-  BEST_CK=$(python3 << 'EOF'
+  BEST_CK=$(python3 << EOF
 import glob, re, zipfile
 cks = glob.glob("$RUN_DIR/stage_d12/lightning_logs/version_*/checkpoints/epoch=*.ckpt")
 def ep(f):

@@ -40,7 +40,7 @@ for OPP in $OPPS; do
       continue
     fi
     if [ "$PROTO" = 2s ]; then EACH="proto=uci timemargin=200"
-    else TC="depth=20"; OTCS=""; EACH="proto=uci"; fi
+    else TC="plies=20"; OTCS=""; EACH="proto=uci"; fi
     rm -f "$PGN"
     if [ "$PROTO" = 2s ]; then TC="st=2"; OTCS="st=${ODDS}"; fi
     echo "[$(date +%H:%M)] $SERIES vs $OPP $PROTO (opp $OTCS) — match starting"

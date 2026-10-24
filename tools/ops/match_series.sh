@@ -34,7 +34,11 @@ for OPP in $OPPS; do
   IFS='|' read -r OCMD OOPT PROTOS <<< "$(opp "$OPP")" || exit 1
   for PROTO in $PROTOS; do
     PGN="$OUT/${SERIES}_vs_${OPP}_${PROTO}.pgn"
-    [ -f "$PGN" ] && continue                      # idempotent per series
+    # idempotent per series — but only COMPLETE matches (6 games) count;
+    # empty/partial leftovers from crashed runs are redone
+    if [ -f "$PGN" ] && [ "$(grep -c '\[Event' "$PGN" 2>/dev/null || echo 0)" -ge 6 ]; then
+      continue
+    fi
     if [ "$PROTO" = 2s ]; then TC="st=2"; EACH="proto=uci timemargin=200"
     else TC="depth=20"; EACH="proto=uci"; fi
     rm -f "$PGN"

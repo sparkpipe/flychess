@@ -31,7 +31,7 @@ opp() {
 }
 
 for OPP in $OPPS; do
-  IFS='|' read -r OCMD OOPT PROTOS <<< "$(opp "$OPP")" || exit 1
+  IFS='|' read -r OCMD OOPT PROTOS ODDS <<< "$(opp "$OPP")" || exit 1
   for PROTO in $PROTOS; do
     PGN="$OUT/${SERIES}_vs_${OPP}_${PROTO}.pgn"
     # idempotent per series — but only COMPLETE matches (6 games) count;
@@ -39,13 +39,14 @@ for OPP in $OPPS; do
     if [ -f "$PGN" ] && [ "$(grep -c '\[Event' "$PGN" 2>/dev/null || echo 0)" -ge 6 ]; then
       continue
     fi
-    if [ "$PROTO" = 2s ]; then TC="st=2"; EACH="proto=uci timemargin=200"
-    else TC="depth=20"; EACH="proto=uci"; fi
+    if [ "$PROTO" = 2s ]; then EACH="proto=uci timemargin=200"
+    else TC="depth=20"; OTCS=""; EACH="proto=uci"; fi
     rm -f "$PGN"
-    echo "[$(date +%H:%M)] $SERIES vs $OPP $PROTO — match starting"
+    if [ "$PROTO" = 2s ]; then TC="st=2"; OTCS="st=${ODDS}"; fi
+    echo "[$(date +%H:%M)] $SERIES vs $OPP $PROTO (opp $OTCS) — match starting"
     "$FASTCHESS_BIN" \
       -engine name="$SERIES" cmd="$FORK_BIN" $TC option.EvalFile="$NET" \
-      -engine name="$OPP" cmd="$OCMD" $TC $OOPT \
+      -engine name="$OPP" cmd="$OCMD" $OTCS $OOPT \
       -each $EACH -rounds 3 -repeat -recover \
       -openings file="$CHESS_DATA/engines/3open.epd" format=epd \
       -pgnout file="$PGN" \

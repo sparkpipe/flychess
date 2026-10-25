@@ -4,6 +4,9 @@
 # 15 stale validations, 12h safety cap per phase.
 : "${BIN_DIR:?BIN_DIR not set (holds d12/ and d20/ bins)}"
 : "${RUN_DIR:?RUN_DIR not set (checkpoints + best.nnue land here)}"
+: "${PLATEAU_STALE:=15}"          # stale validations before advancing
+# SKIP_D12=1: skip the d12 phase; warm from RESUME_CKPT if set, else FRESH
+RESUME_CKPT="${RESUME_CKPT:-}"
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 cd "$REPO/nnue-pytorch"
 mkdir -p "$RUN_DIR"
@@ -47,7 +50,7 @@ PYEOF
     if [ -n "${B2:-}" ] && [ "$B2" != "-1" ]; then
       if python3 -c "exit(0 if $B2 > $BEST else 1)" 2>/dev/null; then BEST=$B2; BEST_EP=$E2; fi
       local GAP=$(( L2 - BEST_EP ))
-      if [ $GAP -ge 15 ]; then
+      if [ $GAP -ge "$PLATEAU_STALE" ]; then
         echo "[$(date +%H:%M)] d$D: plateau (best $BEST @e$BEST_EP, gap=$GAP) — advancing"
         kill $TPID; sleep 10; kill -9 $TPID 2>/dev/null; break
       fi
@@ -71,20 +74,13 @@ EOF
 }
 
 if [ "${SKIP_D12:-0}" = 1 ]; then
-  BEST_CK=$(python3 << EOF
-import glob, re, zipfile
-cks = glob.glob("$RUN_DIR/stage_d12/lightning_logs/version_*/checkpoints/epoch=*.ckpt")
-def ep(f):
-    m = re.search(r"epoch=(\d+)", f); return int(m.group(1)) if m else -1
-cks.sort(key=ep, reverse=True)
-for c in cks:
-    try:
-        zipfile.ZipFile(c).namelist(); print(c); break
-    except: continue
-EOF
-)
-  [ -z "$BEST_CK" ] && { echo "SKIP_D12: no d12 ckpt"; exit 1; }
-  echo "SKIP_D12=1 — phase 2 from $(basename "$BEST_CK")"
+  if [ -n "$RESUME_CKPT" ]; then
+    BEST_CK="$RESUME_CKPT"
+    echo "SKIP_D12=1 — phase 2 warm from $RESUME_CKPT (stale=$PLATEAU_STALE)"
+  else
+    BEST_CK=""
+    echo "SKIP_D12=1 — phase 2 FRESH (stale=$PLATEAU_STALE)"
+  fi
 else
   run_phase 12 ""
 fi

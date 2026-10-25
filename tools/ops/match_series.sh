@@ -23,7 +23,7 @@ opp() {
   case "$1" in
     general3)  echo "$FORK_BIN|option.EvalFile=$CHESS_DATA/runs-general3/best.nnue|2s d20" ;;
     general3b) echo "$FORK_BIN|option.EvalFile=$CHESS_DATA/runs-general3b/best.nnue|2s d20" ;;
-    SF8)       echo "$CHESS_DATA/engines/sf8/stockfish||2s d20|6" ;;
+    SF8)       echo "$CHESS_DATA/engines/sf8/stockfish||2s d20|2" ;;
     SF17)      echo "$SF17_BIN||2s d20" ;;
     nQ)        echo "$CHESS_DATA/engines/nq13/stockfish|$NQF|2s d20" ;;
     *)         echo "unknown opponent: $1" >&2; return 1 ;;

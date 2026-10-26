@@ -26,6 +26,9 @@ opp() {
     SF8)       echo "$CHESS_DATA/engines/sf8/stockfish||2s d20|6" ;;
     SF17)      echo "$SF17_BIN||2s d20" ;;
     nQ)        echo "$CHESS_DATA/engines/nq13/stockfish|$NQF|2s d20" ;;
+    srwarm)    echo "$FORK_BIN|option.EvalFile=$CHESS_DATA/srwarm.nnue|2s d20|2" ;;
+    srfresh)   echo "$FORK_BIN|option.EvalFile=$CHESS_DATA/srfresh.nnue|2s d20|2" ;;
+    srd12)     echo "$FORK_BIN|option.EvalFile=$CHESS_DATA/sr_d12.nnue|2s d20|2" ;;
     *)         echo "unknown opponent: $1" >&2; return 1 ;;
   esac
 }
